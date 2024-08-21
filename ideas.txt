@@ -1,0 +1,43 @@
+stable baselines commented a2c
+
+cosas que faltan:
+- renderer mujoco, para poder visualizar ls trayectorias generadas... 
+- check termination penalty
+- se usa el score para los resultados, quizas en vez de usar el dataset para el score, usar el real, hacer una cosa con las infos del dataset.
+
+cosas que hacer:
+- hacer renderer y salvar las trayectorias
+- hacer una wandb table para los resultados...
+
+ideas renderer:
+hacer rendering del plan y de lo que realmente ocurrió y guardar
+depues hacer rendering del planeo paso a paso.
+
+- quizas usar ref min max score para los datasets bounds 
+- hacer check compatibility en update v2 to v5
+
+cosas que hacer: 
+- leer del config el guide tambien
+- cambiar nombre a directorios para que acepten tambien las guiding functions. y posibles otros cambios de algoritmo como ddim entre otros, quizas nombrarlos con un id y referenciarlos en un json o algo asi
+- añadir datasets con los modelos entrenados
+- refactorizar configs y nombres de experimentos
+- hacer que generate experiments corra lista de experimentos
+
+
+
+
+importante:
+
+- debug guidance dynamics (creo que esta bien), faltaria hacer prueba y otener resultados...
+- hacer reader distribuciones rollouts
+- usar safety feature? quizas probar walker con guidance safe vs sin ... quitar otros gradientes y dejar solo para que sea safety... ver que pasa
+
+- probar con un feature nada que ver, por ejemplo half cheetah que se mueva al revez... o para arriba
+
+- resultados con scale = 0 con rar rewards y con values function... para ver que es mejor para dagger... es probable que funque mejor el raw 
+
+no tan importante (sujeto al tiempo):
+- ver ds replay
+- ver hopper without termination si hay tiempo ...
+
+
