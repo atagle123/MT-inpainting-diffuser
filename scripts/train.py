@@ -13,7 +13,7 @@ import wandb
 #----------------------------------- setup -----------------------------------#
 #-----------------------------------------------------------------------------#
 
-dataset="walker2d"
+dataset=""
 
 args=load_experiment_params(f"logs/configs/{dataset}/{dataset}-medium-expert-v2/configs_diffusion.txt")
 

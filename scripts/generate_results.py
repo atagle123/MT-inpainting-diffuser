@@ -37,7 +37,7 @@ def main():
     num_tasks_per_batch=6
     num_batches=5
 
-    script="scripts/plan_guide_dynamics.py"
+    script="scripts/plan.py"
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
         futures = [executor.submit(run_plan_guide, conda_env,num_batches,script) for _ in range(num_tasks_per_batch)]
