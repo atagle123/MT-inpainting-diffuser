@@ -66,7 +66,7 @@ class Trainer(object):
 
         self.dataset = dataset
         self.dataloader = cycle(torch.utils.data.DataLoader(
-            self.dataset, batch_size=train_batch_size, num_workers=1, shuffle=True, pin_memory=True
+            self.dataset, batch_size=train_batch_size, num_workers=0, shuffle=True, pin_memory=True
         ))
         self.dataloader_vis = cycle(torch.utils.data.DataLoader(
             self.dataset, batch_size=1, num_workers=0, shuffle=True, pin_memory=True
@@ -98,17 +98,17 @@ class Trainer(object):
 
         timer = Timer()
         for step in range(n_train_steps):
-            self.optimizer.zero_grad()
 
             for i in range(self.gradient_accumulate_every):
                 batch = next(self.dataloader)
-                batch = batch_to_device(batch)  # batch to device
+                batch = batch_to_device(batch)  # batch to device # check this... 
 
                 loss, infos = self.model.loss(*batch)
                 loss = loss / self.gradient_accumulate_every
                 loss.backward()
 
             self.optimizer.step()
+            self.optimizer.zero_grad()
 
             if self.step % self.update_ema_every == 0:
                 self.step_ema()
