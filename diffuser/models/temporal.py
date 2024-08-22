@@ -52,7 +52,6 @@ class TemporalUnet(nn.Module):
         self,
         horizon,
         transition_dim,
-        cond_dim,
         dim=32,
         dim_mults=(1, 2, 4, 8),
         attention=False,
@@ -92,7 +91,6 @@ class TemporalUnet(nn.Module):
         else:
             embed_dim = dim
 
-        time_dim = dim
         self.time_mlp = nn.Sequential(
             SinusoidalPosEmb(dim),
             nn.Linear(dim, dim * 4),
@@ -109,8 +107,8 @@ class TemporalUnet(nn.Module):
             is_last = ind >= (num_resolutions - 1)
 
             self.downs.append(nn.ModuleList([
-                ResidualTemporalBlock(dim_in, dim_out, embed_dim=time_dim, horizon=horizon),
-                ResidualTemporalBlock(dim_out, dim_out, embed_dim=time_dim, horizon=horizon),
+                ResidualTemporalBlock(dim_in, dim_out, embed_dim=embed_dim, horizon=horizon),
+                ResidualTemporalBlock(dim_out, dim_out, embed_dim=embed_dim, horizon=horizon),
                 Residual(PreNorm(dim_out, LinearAttention(dim_out))) if attention else nn.Identity(), # dd le saca los resifuales
                 Downsample1d(dim_out) if not is_last else nn.Identity()
             ]))
@@ -119,16 +117,16 @@ class TemporalUnet(nn.Module):
                 horizon = horizon // 2
 
         mid_dim = dims[-1]
-        self.mid_block1 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim, horizon=horizon)
+        self.mid_block1 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=embed_dim, horizon=horizon)
         self.mid_attn = Residual(PreNorm(mid_dim, LinearAttention(mid_dim))) if attention else nn.Identity() # dd le saca esto
-        self.mid_block2 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim, horizon=horizon)
+        self.mid_block2 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=embed_dim, horizon=horizon)
 
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (num_resolutions - 1)
 
             self.ups.append(nn.ModuleList([
-                ResidualTemporalBlock(dim_out * 2, dim_in, embed_dim=time_dim, horizon=horizon),
-                ResidualTemporalBlock(dim_in, dim_in, embed_dim=time_dim, horizon=horizon),
+                ResidualTemporalBlock(dim_out * 2, dim_in, embed_dim=embed_dim, horizon=horizon),
+                ResidualTemporalBlock(dim_in, dim_in, embed_dim=embed_dim, horizon=horizon),
                 Residual(PreNorm(dim_in, LinearAttention(dim_in))) if attention else nn.Identity(), ## dd le saca esto
                 Upsample1d(dim_in) if not is_last else nn.Identity()
             ]))
@@ -141,7 +139,7 @@ class TemporalUnet(nn.Module):
             nn.Conv1d(dim, transition_dim, 1),
         )
 
-    def forward(self, x, cond, time,returns=None,use_dropout=True,force_dropout=False):
+    def forward(self, x, time,returns=None,use_dropout=True,force_dropout=False):
         '''
             x : [ batch x horizon x transition ]
             returns : [batch x horizon]
