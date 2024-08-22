@@ -1,7 +1,7 @@
 import os
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from diffuser.sampling.guides import ValueGuide,RawValueGuide,RawValueGuide_manual_grad
+from diffuser.sampling.guides import ValueGuide
 from diffuser.sampling.policies import GuidedPolicy
 import diffuser.sampling as sampling
 from diffuser.utils.setup import load_experiment_params,set_seed
@@ -11,7 +11,6 @@ import imageio.v2 as iio
 import numpy as np
 import torch
 from datetime import datetime
-from diffuser.models.raw_rewards import Half_cheetah_reward,Hopper_reward,Walker2d_reward
 from diffuser.utils.rollouts import TrajectoryBuffer
 #-----------------------------------------------------------------------------#
 #----------------------------------- setup -----------------------------------#
@@ -75,7 +74,6 @@ value_dataset.inference_mode()
 ## initialize value guide
 #value_function = value_experiment.ema
 
-rew_model=Half_cheetah_reward(dataset)
 #rew_model=Walker2d_reward(dataset)
 guide_config = utils.Config(RawValueGuide, model=rew_model, verbose=False) # value function
 guide = guide_config()

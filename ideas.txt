@@ -1,1 +1,5 @@
 ver maze 2d training y entrenar...
+
+
+funciones a cambiar:
+- sort by values
