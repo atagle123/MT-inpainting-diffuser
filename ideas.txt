@@ -1,5 +1,18 @@
 ver maze 2d training y entrenar...
 
 
+
+cosas que hacer:
+- implementar safe limits normalizer... (probar)
+- implementar el formato a conditioning en dataset y en modelo de difusion
+- implementar masking y reward to go conditioning con normalization en dataset. (probar)
+- terminar de implementar modelo (probar)
+- implementar modelo de difusion ṕara class free guidance (probar)
+- ver dataset maze 2d y preparar para entrenar
+
+Luego:
+- implementar sampling class free y repaint sampling... 
+- implementar conditioning en policies, sampling y repaint sampling...
+- ver script de evaluacion y evaluar
 funciones a cambiar:
 - sort by values
