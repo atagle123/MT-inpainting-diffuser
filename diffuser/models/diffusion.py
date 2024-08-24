@@ -23,17 +23,12 @@ def default_sample_fn(model, x, cond, t):
 
     # no noise when t == 0
     noise = torch.randn_like(x)
-    noise[t == 0] = 0
+    noise[t == 0] = 0 #TODO : aca hacen algo diferente con non zero mask... 
+    # nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
+    # return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
 
     values = torch.zeros(len(x), device=x.device)
     return model_mean + model_std * noise, values
-
-
-def sort_by_values(x, values):
-    inds = torch.argsort(values, descending=True)
-    x = x[inds]
-    values = values[inds]
-    return x, values
 
 
 def make_timesteps(batch_size, i, device):
@@ -111,12 +106,17 @@ class GaussianDiffusion(nn.Module):
             dim_weights[self.action_dim + ind] *= w
 
         ## decay loss with trajectory timestep: discount**t
-        discounts = discount ** torch.arange(self.horizon, dtype=torch.float)
+        discounts = discount ** torch.arange(self.horizon, dtype=torch.float) #TODO: ver aca para que tome en cuenta el step del que se esta prediciendo... 
         discounts = discounts / discounts.mean()
         loss_weights = torch.einsum('h,t->ht', discounts, dim_weights)
 
+        """           # Cause things are conditioned on t=0 en dd usan esto... porque el inv model es el que predice la accion...
+        if self.predict_epsilon:
+            loss_weights[0, :] = 0"""
+
         ## manually set a0 weight
-        loss_weights[0, :self.action_dim] = action_weight
+        loss_weights[0, :self.action_dim] = action_weight                # TODO: cambiar aca si usamos el mask EL ACTION WEIGHT Y VER LA LOSS EN GENERAL PARA QUE NO HAGA LOSS SOBRE EL MASK QUIZAS (AUNQUE SERIA 0 ... )
+        # loss_weights[0, :] = action_weight EN MTDIFF HACEN ESTO... (probablemente porque el estado inicial esta condicionado...)
         return loss_weights
 
     #------------------------------------------ sampling ------------------------------------------#
@@ -126,13 +126,10 @@ class GaussianDiffusion(nn.Module):
             if self.predict_epsilon, model output is (scaled) noise;
             otherwise, model predicts x0 directly
         '''
-        if self.predict_epsilon:
-            return (
-                extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t -
-                extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape) * noise
-            )
-        else:
-            return noise
+        return (
+            extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t -
+            extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape) * noise
+        )
 
     def q_posterior(self, x_start, x_t, t):
         posterior_mean = (
@@ -163,7 +160,7 @@ class GaussianDiffusion(nn.Module):
         device = self.betas.device
 
         batch_size = shape[0]
-        x = torch.randn(shape, device=device)
+        x = torch.randn(shape, device=device) # TODO:  en dd usan 0.5*torch.randn(shape, device=device) y no en mtdiff
         x = apply_conditioning(x, cond, self.action_dim) # apply conditioning to first sample 
 
         chain = [x] if return_chain else None
@@ -171,16 +168,16 @@ class GaussianDiffusion(nn.Module):
         progress = utils.Progress(self.n_timesteps) if verbose else utils.Silent()
         for i in reversed(range(0, self.n_timesteps)):
             t = make_timesteps(batch_size, i, device)
-            x, values = sample_fn(self, x, cond, t, **sample_kwargs) # sample with conditions
-            x = apply_conditioning(x, cond, self.action_dim) # apply conditioning again 
+            x = sample_fn(self, x, cond, t, **sample_kwargs) # sample with conditions
+            x = apply_conditioning(x, cond, self.action_dim) # apply conditioning again # TODO: cambiar aca por el mask y todo y usar repaint sampling... 
 
-            progress.update({'t': i, 'vmin': values.min().item(), 'vmax': values.max().item()})
+            progress.update({'t': i})
             if return_chain: chain.append(x)
 
-        progress.stamp()
-        # cambio aqui el sort b yvalues         x, values = sort_by_values(x, values)
+        progress.stamp() # en otros usar .close()
+        # cambio aqui el sort b yvalues. es lo mismo solo q lo uso en la policy para tener mas control de lo que pasa y hacer um algoritmo mas general... 
         if return_chain: chain = torch.stack(chain, dim=1)
-        return Sample(x, values, chain)
+        return Sample(x,  chain)
 
     @torch.no_grad()
     def conditional_sample(self, cond, horizon=None, **sample_kwargs):
@@ -192,7 +189,7 @@ class GaussianDiffusion(nn.Module):
         horizon = horizon or self.horizon
         shape = (batch_size, horizon, self.transition_dim)
 
-        return self.p_sample_loop(shape, cond, **sample_kwargs)
+        return self.p_sample_loop(shape, cond, **sample_kwargs) #   TODO add returns conditioning... 
 
     #------------------------------------------ training ------------------------------------------#
 
@@ -208,13 +205,18 @@ class GaussianDiffusion(nn.Module):
         return sample
 
     def p_losses(self, x_start, cond, t):
+        #TODO: OJO QUE ACA PARA MTDIFF usan unos einops, ver esto... 
         noise = torch.randn_like(x_start)
 
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         x_noisy = apply_conditioning(x_noisy, cond, self.action_dim)
 
-        x_recon = self.model(x_noisy, cond, t)
-        x_recon = apply_conditioning(x_recon, cond, self.action_dim)
+        x_recon = self.model(x_noisy, cond, t) #TODO: RETURNS ADD CONDITIONING
+        #x_recon = apply_conditioning(x_recon, cond, self.action_dim)
+
+
+        if not self.predict_epsilon:
+            x_recon = apply_conditioning(x_recon, cond, self.action_dim)
 
         assert noise.shape == x_recon.shape
 
@@ -226,9 +228,9 @@ class GaussianDiffusion(nn.Module):
         return loss, info
 
     def loss(self, x, *args):
-        batch_size = len(x)
+        batch_size = len(x) # TODO aca mtdiff hace algo con einops...
         t = torch.randint(0, self.n_timesteps, (batch_size,), device=x.device).long()
-        return self.p_losses(x, *args, t)
+        return self.p_losses(x, *args, t) # TODO: añadir condicionamiento
 
     def forward(self, cond, *args, **kwargs):
         return self.conditional_sample(cond, *args, **kwargs)

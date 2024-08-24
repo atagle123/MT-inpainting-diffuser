@@ -3,7 +3,7 @@ ver maze 2d training y entrenar...
 
 
 cosas que hacer:
-- implementar safe limits normalizer... (probar)
+- implementar safe limits normalizer... (probar) falta probar... 
 - implementar el formato a conditioning en dataset y en modelo de difusion
 - implementar masking y reward to go conditioning con normalization en dataset. (probar)
 - terminar de implementar modelo (probar)

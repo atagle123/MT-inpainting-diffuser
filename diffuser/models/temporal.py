@@ -109,7 +109,7 @@ class TemporalUnet(nn.Module):
             self.downs.append(nn.ModuleList([
                 ResidualTemporalBlock(dim_in, dim_out, embed_dim=embed_dim, horizon=horizon),
                 ResidualTemporalBlock(dim_out, dim_out, embed_dim=embed_dim, horizon=horizon),
-                Residual(PreNorm(dim_out, LinearAttention(dim_out))) if attention else nn.Identity(), # dd le saca los resifuales
+                Residual(PreNorm(dim_out, LinearAttention(dim_out))) if attention else nn.Identity(), # dd le saca los resifuales  # maybe use cross attention... 
                 Downsample1d(dim_out) if not is_last else nn.Identity()
             ]))
 
