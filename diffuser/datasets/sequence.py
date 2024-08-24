@@ -8,8 +8,8 @@ import minari
 from diffuser.utils.config import import_class
 from diffuser.utils.arrays import atleast_2d,pad
 
-Batch = namedtuple('Batch', 'trajectories conditions')
-RewardBatch = namedtuple('Batch', 'trajectories conditions returns')
+Batch = namedtuple('Batch', 'trajectories')
+RewardBatch = namedtuple('Batch', 'trajectories returns')
 
 
 class InpaintSequenceDataset(torch.utils.data.Dataset):
@@ -119,11 +119,6 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
         indices = np.array(indices)
         self.indices=indices
 
-    def get_conditions(self, observations):
-        '''
-            condition on current observation for planning
-        '''
-        return {0: observations[0]} # 50/ 50 mask and uniform mask over the whole horizon...
     
     def inference_mode(self):
         del self.episodes; del self.indices; del self.normalizer.minari_dataset  #save memory
@@ -140,20 +135,6 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
         actions = episode['actions'][start:end]
         rewards=episode['rewards'][start:end]
 
-        mask=np.random.binomial(n=1, p=self.p_mask)
-        if mask:
-            raise NotImplementedError
-            #mask...
-
-        """        conditions = np.ones((self.horizon, 2*traj_dim)).astype(np.float32)
-
-        # Set up conditional masking
-        conditions[t_step:,:self.action_dim] = 0
-        conditions[:,traj_dim:] = 0
-        conditions[t_step,traj_dim:traj_dim+self.action_dim] = 1
-        """
-
-        conditions = self.get_conditions(observations) # fix this... is the mask...
 
         trajectories = np.concatenate([actions, observations,rewards], axis=-1) # check this
 
@@ -162,9 +143,9 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
                 Para normalizar, primero normalizar rewards (0,1), calcular reward to go de cada estado (cierto gamma), normalizar con formula de gammas... y tenemos el reward to go normalizados de todos los estados (deberian ser similares en treyactorias optimas), luego renormalizar rewards to go para q esten si o si en el rango 0,1 y (condicionar a eso...) despyues al hacer el mask condicionar el rtg desde el estado q se esta midiendo (quizas rtg promedio? o descontado tiene sentido hcaerlo para cada estado en todo caso)... y no desde toda la historia. 
             """
             returns=episode['returns'] # deberia dar solo un valor..., ver si hacer el reward to go quizas, tiene mas sentido... 
-            batch = RewardBatch(trajectories, conditions, returns) # probar esto, el contra argumento es que el las rewards pasadas pudieron haber sido buenas, lo q no implica q las futuras sean buenas. quizas condicionar en returns y reward to go... 
+            batch = RewardBatch(trajectories, returns) # probar esto, el contra argumento es que el las rewards pasadas pudieron haber sido buenas, lo q no implica q las futuras sean buenas. quizas condicionar en returns y reward to go... 
         else:
-            batch = Batch(trajectories, conditions)
+            batch = Batch(trajectories)
 
         return batch
 
@@ -201,20 +182,5 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
 
         normed_values = np.array([normed_values], dtype=np.float32)
         return normed_values
-    
-    def get_linear_mask(self):
-        raise NotImplementedError
 
-
-
-class GoalDataset(InpaintSequenceDataset):
-
-    def get_conditions(self, observations):
-        '''
-            condition on both the current observation and the last observation in the plan
-        '''
-        return {
-            0: observations[0],
-            self.horizon - 1: observations[-1],
-        }
 

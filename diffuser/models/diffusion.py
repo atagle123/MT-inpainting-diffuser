@@ -91,15 +91,16 @@ class GaussianDiffusion(nn.Module):
         raise NotImplementedError
 
  
-    def get_mask_loss_weights(self,K):
+    def get_mask_loss_weights(self,K_step_mask):
         '''
             sets loss coefficients for masked trajectory
             
-            K: The masked past step
-        TODO CAMBIAR ACA EL MASK... ver como hacer para los batches... 
+            K_step_mask: (B,)
+        returns: loss_weights: (B,H,T)
         '''
-
-        dim_weights = torch.ones(self.transition_dim, dtype=torch.float32)
+        batch_size=len(K_step_mask)
+        dim_weights=torch.ones(batch_size, self.horizon, self.transition_dim,dtype=torch.float32)
+        #dim_weights = torch.ones(self.transition_dim, dtype=torch.float32)
 
         ## decay loss with trajectory timestep: discount**t
         #discounts = self.loss_discount ** torch.arange(self.horizon-K, dtype=torch.float) #TODO: horizon es todo el horizonte y h-K es lo que hay q predecir... 
@@ -107,8 +108,9 @@ class GaussianDiffusion(nn.Module):
 
         #loss_weights = torch.einsum('h-k,t->(h-k)t', discounts, dim_weights)
 
-        loss_weights[K, :self.action_dim] = self.action_weight
-        loss_weights[K, self.action_dim:self.action_dim+self.observation_dim] = 0 # because the initial state is given 
+        loss_weights[:,K_step_mask, :self.action_dim] = self.action_weight
+        loss_weights[:,K_step_mask, self.action_dim:self.action_dim+self.observation_dim] = 0 # because the initial state is given 
+        loss_weights[:,:K_step_mask, :] = 0 # mask behind
 
         return loss_weights
 
@@ -232,7 +234,7 @@ class GaussianDiffusion(nn.Module):
         pred_epsilon = self.model(x_noisy, returns, t, K=K_step_mask,use_dropout=True) # TODO: maybe add task and actual K step. ver modelo tambien
 
         assert noise.shape == pred_epsilon.shape
-        loss_weights=self.get_mask_loss_weights(K_step_mask) # (B,)-> ()
+        loss_weights=self.get_mask_loss_weights(K_step_mask) # (B,)-> (B,H,T)
         loss, info = self.loss_fn(pred_epsilon, noise,loss_weights) # TODO: falta ver la funcion de loss... 
 
         return loss, info
@@ -248,7 +250,7 @@ class GaussianDiffusion(nn.Module):
         K_step_mask=samples*K_step_mask  # mask with certain probability
         # loss weights = torch.ones[:K_step_mask]=0
 
-        return self.p_losses(x, returns, K_step_mask, t) # TODO: maybe add task and actual K step.
+        return self.p_losses(x, returns, K_step_mask.long(), t) # TODO: maybe add task and actual K step.
 
 
 
