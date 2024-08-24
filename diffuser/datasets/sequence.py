@@ -16,7 +16,7 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
 
     def __init__(self, env_name='halfcheetah-expert-v0', horizon=64,
         normalizer="normalization.GaussianNormalizer", preprocess_fns=[], max_path_length=1000, # cambiar normalizer por true o false, ver si en un futuro usamos otros...
-        max_n_episodes=10000, termination_penalty=0, seed=None,use_padding=True, include_returns=True, normed_keys=['observations', 'actions','rewards'], p_mask=0.5): 
+        max_n_episodes=10000, termination_penalty=0, seed=None,use_padding=True, include_returns=True, normed_keys=['observations', 'actions','rewards'], p_mask=0.5,discount=0.99): 
         
         self.preprocess_fn = get_preprocess_fn(preprocess_fns, env_name)
         self.horizon = horizon
@@ -25,6 +25,7 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
         self.use_padding=use_padding
         self.include_returns=include_returns
         self.p_mask=p_mask
+        self.discount=discount
 
         self.minari_dataset=minari.load_dataset(env_name)
         self.minari_dataset.set_seed(seed=seed)
@@ -52,8 +53,11 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
         
         self.make_dataset(normed_keys=normed_keys)
         self.make_indices(horizon)
+
+        if self.include_returns: 
+            self.make_returns() # TODO ver cuanto se demora
         
-    def make_dataset(self,normed_keys=['observations', 'actions']): # add new field total return
+    def make_dataset(self,normed_keys=['observations', 'actions']): 
         """
         Format: episodes_dict.keys-> ["observations","actions","rewards","terminations","truncations","total_returns"]
                 episodes_dict.values-> np.array 2d [H,Dim]  #revisar
@@ -69,21 +73,16 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
                 attribute_2d=atleast_2d(attribute)
                 attribute=pad(attribute_2d,max_len=self.max_path_length) #pad pad before than normalizer? and for all the keys
 
-                if key in normed_keys:
-                    attribute=self.normalizer.normalize(attribute,key) # normalize
-
-                #attribute=pad(attribute_2d,max_len=self.max_path_length)
                 assert attribute.shape==(self.max_path_length,attribute_2d.shape[-1]) # check normalized dims 
 
-                if key=="rewards":  # ojo aca donde poner esto... antes o despues de normalizar... 
-
+                if key=="rewards":  
                     if episode.terminations.any():
                         episode_lenght=episode.total_timesteps
                         attribute[episode_lenght-1]+=self.termination_penalty  # o quizas -1 tambien sirve...
+                    
+                if key in normed_keys:
+                    attribute=self.normalizer.normalize(attribute,key) # normalize
                 
-
-                    # hacer suma cumulativa para ver total return de la trayectoria... y normalizar ...
-
                 dict[key]=attribute
             episodes_dict[episode.id]=dict
 
@@ -128,7 +127,7 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
         return len(self.indices)
 
     def __getitem__(self, idx, eps=1e-4):
-        ep_id, start, end = self.indices[idx]
+        ep_id, start, end = self.indices[idx] # TODO make a numpy array consisting of idx-> returns... 
         episode=self.episodes[ep_id]  # normed episode # ojo con los id checkear que esten bien... 
 
         observations = episode['observations'][start:end]
@@ -163,8 +162,8 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
         print('[ datasets/sequence ] Getting value dataset bounds...', end=' ', flush=True)
         vmin = np.inf
         vmax = -np.inf
-        for i in range(len(self.indices)):
-            value = self.__getitem__(i).values.item()
+        for idx in range(len(self.traj_rtg)): # TODO hacer esto mas facil... 
+            value = self.traj_rtg[idx]
             vmin = min(value, vmin)
             vmax = max(value, vmax)
         print('✓')
@@ -182,5 +181,25 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
 
         normed_values = np.array([normed_values], dtype=np.float32)
         return normed_values
+
+    def make_returns(self,): # TODO idea gamma deberia ser el mismo con el que se testea ... 
+        discount_array=self.discount ** np.arange(self.max_path_length) # (H)
+
+        self.traj_rtg={} # hacer un np array quizas... 
+        for ep_id, start, end in self.indices:
+            episode=self.episodes[ep_id]  # normed episode # ojo con los id checkear que esten bien... 
+            rewards=episode['rewards'][start:] # norm rtg of thw trajectory
+            discount_rew=rewards*discount_array[:-start] # (H)*(H)-> H #TODO check this
+            self.traj_rtg[idx]=discount_rew.sum() #H->1 # TODO falta normnalizar por el gamma y todo... # quizas no usar gamma... 
+
+        # Norm new values... if the highest value is not 1.
+        self.nromed=False
+
+        for idx in range(len(self.traj_rtg)):
+
+            self.traj_rtg[idx]=self.normalize_value(value)
+            
+
+
 
 

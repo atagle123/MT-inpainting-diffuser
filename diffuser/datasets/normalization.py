@@ -115,7 +115,7 @@ class LimitsNormalizer(Normalizer):
         super().__init__(minari_dataset,keys,use_padding,max_len)
         self.field_normalizer={}
     
-    def normalize(self,unnormed_data, key):
+    def normalize(self,unnormed_data, key): # TODO test... 
         
         self.field_normalizer[key]="limits"
 
