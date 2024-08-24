@@ -38,15 +38,16 @@ def make_timesteps(batch_size, i, device):
 
 class GaussianDiffusion(nn.Module):
     def __init__(self, model, horizon, observation_dim, action_dim, n_timesteps=1000,
-        loss_type='l1', clip_denoised=False, predict_epsilon=True,
-        action_weight=1.0, loss_discount=1.0, loss_weights=None,
-    ):
+        loss_type='l2', clip_denoised=True,
+        action_weight=1.0, loss_discount=1.0):
         super().__init__()
         self.horizon = horizon
         self.observation_dim = observation_dim
         self.action_dim = action_dim
-        self.transition_dim = observation_dim + action_dim
+        self.transition_dim = observation_dim + action_dim+1 # (S+A+R)
         self.model = model
+        self.action_weight=action_weight
+        self.loss_discount=loss_discount
 
         betas = cosine_beta_schedule(n_timesteps)
         alphas = 1. - betas
@@ -55,7 +56,6 @@ class GaussianDiffusion(nn.Module):
 
         self.n_timesteps = int(n_timesteps)
         self.clip_denoised = clip_denoised
-        self.predict_epsilon = predict_epsilon
 
         self.register_buffer('betas', betas)
         self.register_buffer('alphas_cumprod', alphas_cumprod)
@@ -82,49 +82,41 @@ class GaussianDiffusion(nn.Module):
             (1. - alphas_cumprod_prev) * np.sqrt(alphas) / (1. - alphas_cumprod))
 
         ## get loss coefficients and initialize objective
-        loss_weights = self.get_loss_weights(action_weight, loss_discount, loss_weights)
-        self.loss_fn = Losses[loss_type](loss_weights, self.action_dim)
+        self.loss_fn = Losses[loss_type](self.action_dim) 
 
-    def get_loss_weights(self, action_weight, discount, weights_dict):
-        '''
-            sets loss coefficients for trajectory
+    def get_random_mask(self):
+        #TODO samplear de una uniforme y mitad mitad... o quizas menos...
+        raise NotImplementedError
 
-            action_weight   : float
-                coefficient on first action loss
-            discount   : float
-                multiplies t^th timestep of trajectory loss by discount**t
-            weights_dict    : dict
-                { i: c } multiplies dimension i of observation loss by c
+ 
+    def get_mask_loss_weights(self,K):
         '''
-        self.action_weight = action_weight
+            sets loss coefficients for masked trajectory
+            
+            K: The masked past step
+        TODO CAMBIAR ACA EL MASK... ver como hacer para los batches... 
+        '''
 
         dim_weights = torch.ones(self.transition_dim, dtype=torch.float32)
 
-        ## set loss coefficients for dimensions of observation
-        if weights_dict is None: weights_dict = {}
-        for ind, w in weights_dict.items():
-            dim_weights[self.action_dim + ind] *= w
-
         ## decay loss with trajectory timestep: discount**t
-        discounts = discount ** torch.arange(self.horizon, dtype=torch.float) #TODO: ver aca para que tome en cuenta el step del que se esta prediciendo... 
-        discounts = discounts / discounts.mean()
-        loss_weights = torch.einsum('h,t->ht', discounts, dim_weights)
+        #discounts = self.loss_discount ** torch.arange(self.horizon-K, dtype=torch.float) #TODO: horizon es todo el horizonte y h-K es lo que hay q predecir... 
+        #discounts = discounts / discounts.mean() # TODO: para usar los discount podemos calcularlos antes... y sumarlos al mask 
 
-        """           # Cause things are conditioned on t=0 en dd usan esto... porque el inv model es el que predice la accion...
-        if self.predict_epsilon:
-            loss_weights[0, :] = 0"""
+        #loss_weights = torch.einsum('h-k,t->(h-k)t', discounts, dim_weights)
 
-        ## manually set a0 weight
-        loss_weights[0, :self.action_dim] = action_weight                # TODO: cambiar aca si usamos el mask EL ACTION WEIGHT Y VER LA LOSS EN GENERAL PARA QUE NO HAGA LOSS SOBRE EL MASK QUIZAS (AUNQUE SERIA 0 ... )
-        # loss_weights[0, :] = action_weight EN MTDIFF HACEN ESTO... (probablemente porque el estado inicial esta condicionado...)
+        loss_weights[K, :self.action_dim] = self.action_weight
+        loss_weights[K, self.action_dim:self.action_dim+self.observation_dim] = 0 # because the initial state is given 
+
         return loss_weights
+
+
 
     #------------------------------------------ sampling ------------------------------------------#
 
     def predict_start_from_noise(self, x_t, t, noise):
         '''
-            if self.predict_epsilon, model output is (scaled) noise;
-            otherwise, model predicts x0 directly
+            
         '''
         return (
             extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t -
@@ -140,8 +132,21 @@ class GaussianDiffusion(nn.Module):
         posterior_log_variance_clipped = extract(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-    def p_mean_variance(self, x, cond, t):
-        x_recon = self.predict_start_from_noise(x, t=t, noise=self.model(x, cond, t))
+    
+
+
+    def p_mean_variance(self,x, past_K_history, K_step, t, returns=None):
+        # TODO falta agregar que el modelo puede usar otras condiciones...  
+        if self.returns_condition:  # de donde sale eso... TODO 
+            # epsilon could be epsilon or x0 itself
+            epsilon_cond = self.model(x, past_K_history=past_K_history, K_step=K_step, t=t, returns=returns, use_dropout=False)
+            epsilon_uncond = self.model(x, past_K_history=past_K_history, K_step=K_step, t=t, returns=returns, force_dropout=True)
+            epsilon = epsilon_uncond + self.condition_guidance_w*(epsilon_cond - epsilon_uncond)
+        else:
+            epsilon = self.model(x, past_K_history=past_K_history, K_step=K_step, t=t, returns=returns, force_dropout=True)
+
+        t = t.detach().to(torch.int64)
+        x_recon = self.predict_start_from_noise(x, t=t, noise=epsilon)
 
         if self.clip_denoised:
             x_recon.clamp_(-1., 1.)
@@ -152,8 +157,19 @@ class GaussianDiffusion(nn.Module):
                 x_start=x_recon, x_t=x, t=t)
         return model_mean, posterior_variance, posterior_log_variance
 
+
+    
     @torch.no_grad()
-    def p_sample_loop(self, shape, cond, verbose=True, return_chain=False, sample_fn=default_sample_fn, **sample_kwargs):
+    def p_sample(self, x, past_K_history,K_step, t, returns=None): # Falta REpaint sampling TODO
+        b, *_, device = *x.shape, x.device
+        model_mean, _, model_log_variance = self.p_mean_variance(x=x, past_K_history=past_K_history, K_step=K_step, t=t, returns=returns)
+        noise = 0.5*torch.randn_like(x)
+        # no noise when t == 0
+        nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
+        return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
+
+    @torch.no_grad()
+    def p_sample_loop(self, shape, past_K_history, verbose=True, return_chain=False, sample_fn=default_sample_fn, **sample_kwargs):
         """ Classical DDPM (check this) sampling algorithm with sample_fn incorporated and conditioning
         
         """
@@ -161,15 +177,15 @@ class GaussianDiffusion(nn.Module):
 
         batch_size = shape[0]
         x = torch.randn(shape, device=device) # TODO:  en dd usan 0.5*torch.randn(shape, device=device) y no en mtdiff
-        x = apply_conditioning(x, cond, self.action_dim) # apply conditioning to first sample 
+        #x = apply_conditioning(x, cond, self.action_dim) # apply conditioning to first sample 
 
         chain = [x] if return_chain else None
-
+        K_step=past_K_history.shape[1] # ver esto... TODO
         progress = utils.Progress(self.n_timesteps) if verbose else utils.Silent()
         for i in reversed(range(0, self.n_timesteps)):
             t = make_timesteps(batch_size, i, device)
-            x = sample_fn(self, x, cond, t, **sample_kwargs) # sample with conditions
-            x = apply_conditioning(x, cond, self.action_dim) # apply conditioning again # TODO: cambiar aca por el mask y todo y usar repaint sampling... 
+            x = self.p_sample(self, x, past_K_history,K_step, t, **sample_kwargs) # sample with conditions
+        #    x = apply_conditioning(x, cond, self.action_dim) # apply conditioning again # TODO: cambiar aca por el mask y todo y usar repaint sampling... 
 
             progress.update({'t': i})
             if return_chain: chain.append(x)
@@ -180,16 +196,16 @@ class GaussianDiffusion(nn.Module):
         return Sample(x,  chain)
 
     @torch.no_grad()
-    def conditional_sample(self, cond, horizon=None, **sample_kwargs):
+    def conditional_sample(self, past_K_history, horizon=None, **sample_kwargs):
         '''
             conditions : [ (time, state), ... ]
         '''
         device = self.betas.device
-        batch_size = len(cond[0])
+        batch_size = len(past_K_history[0]) # TODO ver esto...  asume que el past k history esta batchified
         horizon = horizon or self.horizon
         shape = (batch_size, horizon, self.transition_dim)
 
-        return self.p_sample_loop(shape, cond, **sample_kwargs) #   TODO add returns conditioning... 
+        return self.p_sample_loop(shape, past_K_history, **sample_kwargs) #   TODO add returns conditioning... 
 
     #------------------------------------------ training ------------------------------------------#
 
@@ -204,34 +220,34 @@ class GaussianDiffusion(nn.Module):
 
         return sample
 
-    def p_losses(self, x_start, cond, t):
+    def p_losses(self, x_start,returns,K_step_mask, t):
         #TODO: OJO QUE ACA PARA MTDIFF usan unos einops, ver esto... 
         noise = torch.randn_like(x_start)
 
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
-        x_noisy = apply_conditioning(x_noisy, cond, self.action_dim)
+        #x_noisy = apply_conditioning(x_noisy, cond, self.action_dim)
 
-        x_recon = self.model(x_noisy, cond, t) #TODO: RETURNS ADD CONDITIONING
-        #x_recon = apply_conditioning(x_recon, cond, self.action_dim)
+        pred_epsilon = self.model(x_noisy, returns, t,use_dropout=True) # TODO: maybe add task and actual K step. ver modelo tambien
 
+        assert noise.shape == pred_epsilon.shape
 
-        if not self.predict_epsilon:
-            x_recon = apply_conditioning(x_recon, cond, self.action_dim)
-
-        assert noise.shape == x_recon.shape
-
-        if self.predict_epsilon:
-            loss, info = self.loss_fn(x_recon, noise)
-        else:
-            loss, info = self.loss_fn(x_recon, x_start)
+        loss, info = self.loss_fn(pred_epsilon, noise) # TODO: falta ver la funcion de loss... 
 
         return loss, info
 
-    def loss(self, x, *args):
+
+    def loss(self, x, returns, *args): # maybe add task and actual K step.
+
         batch_size = len(x) # TODO aca mtdiff hace algo con einops...
         t = torch.randint(0, self.n_timesteps, (batch_size,), device=x.device).long()
-        return self.p_losses(x, *args, t) # TODO: añadir condicionamiento
 
-    def forward(self, cond, *args, **kwargs):
-        return self.conditional_sample(cond, *args, **kwargs)
+        K_step_mask = torch.randint(0, self.horizon, (batch_size,), device=x.device).long() # TODO: quizas horizon-1 ... usar tambien lo de con cierta prob no usar el masking... quizas multiplicar por una matriz random de 0 y 1... 
+        # quizas para el mask duplicar el batch?
+
+        return self.p_losses(x, returns, K_step_mask, t) # TODO: maybe add task and actual K step.
+
+
+
+    def forward(self, past_K_history, *args, **kwargs):
+        return self.conditional_sample(past_K_history, *args, **kwargs) # TODO: repaint sampling... 
 
