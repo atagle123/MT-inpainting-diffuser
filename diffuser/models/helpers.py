@@ -162,10 +162,10 @@ class WeightedLoss(nn.Module):
             pred, targ : tensor
                 [ batch_size x horizon x transition_dim ]
         '''
-        loss = self._loss(pred, targ)
-        weighted_loss = (loss * weights).mean()
-        a0_loss = (loss[:, 0, :self.action_dim] / self.weights[0, :self.action_dim]).mean() # TODO: Aaca ver ... 
-        return weighted_loss, {'a0_loss': a0_loss}
+        loss = self._loss(pred, targ)  # (B,H,T)
+        weighted_loss = (loss * weights).mean() # (B,H,T)->(1)
+        #a0_loss = (loss[:, 0, :self.action_dim] / self.weights[0, :self.action_dim]).mean() # TODO: Aaca ver ... 
+        return weighted_loss#, {'a0_loss': a0_loss}
 
 
 class WeightedL1(WeightedLoss):

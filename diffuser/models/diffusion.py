@@ -39,7 +39,7 @@ def make_timesteps(batch_size, i, device):
 class GaussianDiffusion(nn.Module):
     def __init__(self, model, horizon, observation_dim, action_dim, n_timesteps=1000,
         loss_type='l2', clip_denoised=True,
-        action_weight=1.0, loss_discount=1.0):
+        action_weight=1.0, loss_discount=1.0,p_mask=0.5):
         super().__init__()
         self.horizon = horizon
         self.observation_dim = observation_dim
@@ -82,7 +82,9 @@ class GaussianDiffusion(nn.Module):
             (1. - alphas_cumprod_prev) * np.sqrt(alphas) / (1. - alphas_cumprod))
 
         ## get loss coefficients and initialize objective
-        self.loss_fn = Losses[loss_type](self.action_dim) 
+        self.loss_fn = Losses[loss_type](self.action_dim)
+
+        self.bernoulli_dist = torch.distributions.Bernoulli(p_mask)
 
     def get_random_mask(self):
         #TODO samplear de una uniforme y mitad mitad... o quizas menos...
@@ -227,11 +229,11 @@ class GaussianDiffusion(nn.Module):
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         #x_noisy = apply_conditioning(x_noisy, cond, self.action_dim)
 
-        pred_epsilon = self.model(x_noisy, returns, t,use_dropout=True) # TODO: maybe add task and actual K step. ver modelo tambien
+        pred_epsilon = self.model(x_noisy, returns, t, K=K_step_mask,use_dropout=True) # TODO: maybe add task and actual K step. ver modelo tambien
 
         assert noise.shape == pred_epsilon.shape
-
-        loss, info = self.loss_fn(pred_epsilon, noise) # TODO: falta ver la funcion de loss... 
+        loss_weights=self.get_mask_loss_weights(K_step_mask) # (B,)-> ()
+        loss, info = self.loss_fn(pred_epsilon, noise,loss_weights) # TODO: falta ver la funcion de loss... 
 
         return loss, info
 
@@ -241,8 +243,10 @@ class GaussianDiffusion(nn.Module):
         batch_size = len(x) # TODO aca mtdiff hace algo con einops...
         t = torch.randint(0, self.n_timesteps, (batch_size,), device=x.device).long()
 
-        K_step_mask = torch.randint(0, self.horizon, (batch_size,), device=x.device).long() # TODO: quizas horizon-1 ... usar tambien lo de con cierta prob no usar el masking... quizas multiplicar por una matriz random de 0 y 1... 
-        # quizas para el mask duplicar el batch?
+        K_step_mask = torch.randint(0, self.horizon, (batch_size,), device=x.device).long() # [0,H-1] #TODO test horizon... 
+        samples = self.bernoulli_dist.sample((batch_size,))
+        K_step_mask=samples*K_step_mask  # mask with certain probability
+        # loss weights = torch.ones[:K_step_mask]=0
 
         return self.p_losses(x, returns, K_step_mask, t) # TODO: maybe add task and actual K step.
 
