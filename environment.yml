@@ -1,4 +1,4 @@
-name: thesis
+name: MT_inpainting_diffuser
 channels:
 - defaults
 - conda-forge
@@ -8,9 +8,9 @@ dependencies:
   - pip==24.0
   - pip:
     - torch==2.3.1
-    - numpy==1.26.4  # ojo con numpy 2
-    - gymnasium==1.0.0a2
-    - minari==0.4.3 # from minari pre release gymnasium change: from gymnasium.wrappers import RecordEpisodeStatistics
+    - numpy==1.26.4 
+    - gymnasium==0.29.1
+    - minari==0.4.3 
     - wandb==0.17.3
     - mujoco==3.1.6
     - einops==0.8.0
@@ -18,3 +18,4 @@ dependencies:
     - h5py==3.11.0
     - imageio==2.34.2
     - imageio[ffmpeg]
+    - matplotlib

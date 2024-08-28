@@ -278,7 +278,7 @@ class GaussianDiffusion_task(nn.Module):
         self.horizon = horizon
         self.observation_dim = observation_dim
         self.action_dim = action_dim
-        self.transition_dim = observation_dim + action_dim+1 # (S+A+R)
+        self.transition_dim = observation_dim + action_dim+3 # (S+A+R+G)
         self.model = model
         self.action_weight=action_weight
         self.loss_discount=loss_discount
@@ -316,7 +316,33 @@ class GaussianDiffusion_task(nn.Module):
             (1. - alphas_cumprod_prev) * np.sqrt(alphas) / (1. - alphas_cumprod))
 
         ## get loss coefficients and initialize objective
-        self.loss_fn = Losses[loss_type](self.action_dim)
+
+        loss_weights = self.get_loss_weights(action_weight, loss_discount)
+        self.loss_fn = Losses[loss_type](loss_weights, self.action_dim)
+
+    def get_loss_weights(self, action_weight, discount):
+        '''
+            sets loss coefficients for trajectory
+
+            action_weight   : float
+                coefficient on first action loss
+            discount   : float
+                multiplies t^th timestep of trajectory loss by discount**t
+
+        '''
+        self.action_weight = action_weight
+
+        dim_weights = torch.ones(self.transition_dim, dtype=torch.float32)
+
+
+        ## decay loss with trajectory timestep: discount**t
+        discounts = discount ** torch.arange(self.horizon, dtype=torch.float)
+        discounts = discounts / discounts.mean()
+        loss_weights = torch.einsum('h,t->ht', discounts, dim_weights)
+
+        ## manually set a0 weight
+        loss_weights[0, :self.action_dim] = action_weight
+        return loss_weights
 
     #------------------------------------------ sampling ------------------------------------------#
 
@@ -341,9 +367,9 @@ class GaussianDiffusion_task(nn.Module):
     
 
 
-    def p_mean_variance(self,x):
+    def p_mean_variance(self,x,t):
 
-        epsilon = self.model(x=x, t=t, force_dropout=True)
+        epsilon = self.model(x=x, t=t)
 
         t = t.detach().to(torch.int64)
         x_recon = self.predict_start_from_noise(x, t=t, noise=epsilon)
@@ -360,52 +386,48 @@ class GaussianDiffusion_task(nn.Module):
 
     
     @torch.no_grad()
-    def p_sample(self, x, past_K_history,K_step, t, returns=None): # Falta REpaint sampling TODO
+    def p_sample(self, x, t): # Falta REpaint sampling TODO
         b, *_, device = *x.shape, x.device
-        model_mean, _, model_log_variance = self.p_mean_variance(x=x, past_K_history=past_K_history, K_step=K_step, t=t, returns=returns)
+        model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=t)
         noise = 0.5*torch.randn_like(x)
         # no noise when t == 0
         nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
         return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
 
     @torch.no_grad()
-    def p_sample_loop(self, shape, past_K_history, verbose=True, return_chain=False, sample_fn=default_sample_fn, **sample_kwargs):
-        """ Classical DDPM (check this) sampling algorithm with sample_fn incorporated and conditioning
+    def p_sample_loop(self, shape, verbose=True, return_chain=False):
+        """ Classical DDPM (check this) sampling algorithm 
         
         """
         device = self.betas.device
 
         batch_size = shape[0]
         x = torch.randn(shape, device=device) # TODO:  en dd usan 0.5*torch.randn(shape, device=device) y no en mtdiff
-        #x = apply_conditioning(x, cond, self.action_dim) # apply conditioning to first sample 
 
-        chain = [x] if return_chain else None
-        K_step=past_K_history.shape[1] # ver esto... TODO
+        chain = [x] if return_chain else None  # TODO: condicionar a s0 si o no? 
         progress = utils.Progress(self.n_timesteps) if verbose else utils.Silent()
         for i in reversed(range(0, self.n_timesteps)):
             t = make_timesteps(batch_size, i, device)
-            x = self.p_sample(self, x, past_K_history,K_step, t, **sample_kwargs) # sample with conditions
-        #    x = apply_conditioning(x, cond, self.action_dim) # apply conditioning again # TODO: cambiar aca por el mask y todo y usar repaint sampling... 
+            x = self.p_sample(self, x, t)
 
             progress.update({'t': i})
             if return_chain: chain.append(x)
 
         progress.stamp() # en otros usar .close()
-        # cambio aqui el sort b yvalues. es lo mismo solo q lo uso en la policy para tener mas control de lo que pasa y hacer um algoritmo mas general... 
+
         if return_chain: chain = torch.stack(chain, dim=1)
         return Sample(x,  chain)
 
     @torch.no_grad()
-    def conditional_sample(self, past_K_history, horizon=None, **sample_kwargs):
+    def conditional_sample(self, horizon=None,batch_size=32, **sample_kwargs):
         '''
             conditions : [ (time, state), ... ]
         '''
         device = self.betas.device
-        batch_size = len(past_K_history[0]) # TODO ver esto...  asume que el past k history esta batchified
         horizon = horizon or self.horizon
         shape = (batch_size, horizon, self.transition_dim)
 
-        return self.p_sample_loop(shape, past_K_history, **sample_kwargs) #   TODO add returns conditioning... 
+        return self.p_sample_loop(shape, **sample_kwargs) #   TODO add returns conditioning... 
 
     #------------------------------------------ training ------------------------------------------#
 
@@ -420,17 +442,17 @@ class GaussianDiffusion_task(nn.Module):
 
         return sample
 
-    def p_losses(self, x_start,returns,K_step_mask, t):
+    def p_losses(self, x_start, t):
         #TODO: OJO QUE ACA PARA MTDIFF usan unos einops, ver esto... 
         noise = torch.randn_like(x_start)
 
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
-        #x_noisy = apply_conditioning(x_noisy, cond, self.action_dim)
+        #x_noisy = apply_conditioning(x_noisy, cond, self.action_dim) # ver si aplicar conditioning... TODO probar con y sin... 
 
-        pred_epsilon = self.model(x_noisy, returns, t, K=K_step_mask,use_dropout=True) # TODO: maybe add task and actual K step. ver modelo tambien
+        pred_epsilon = self.model(x_noisy,t)
 
         assert noise.shape == pred_epsilon.shape
-        loss_weights=self.get_mask_loss_weights(K_step_mask) # (B,)-> (B,H,T)
+        loss_weights=self.get_mask_loss_weights(K_step_mask) # (B,)-> (B,H,T) # train by two modalities? task inference and planning?
         loss, info = self.loss_fn(pred_epsilon, noise,loss_weights) # TODO: falta ver la funcion de loss... 
 
         return loss, info
@@ -441,14 +463,20 @@ class GaussianDiffusion_task(nn.Module):
         batch_size = len(x) # TODO aca mtdiff hace algo con einops...
         t = torch.randint(0, self.n_timesteps, (batch_size,), device=x.device).long()
 
-        K_step_mask = torch.randint(0, self.horizon, (batch_size,), device=x.device).long() # [0,H-1] #TODO test horizon... 
-        samples = self.bernoulli_dist.sample((batch_size,))
-        K_step_mask=samples*K_step_mask  # mask with certain probability
-        # loss weights = torch.ones[:K_step_mask]=0
 
-        return self.p_losses(x, returns, K_step_mask.long(), t) # TODO: maybe add task and actual K step.
+
+        return self.p_losses(x, t) # TODO: maybe add task and actual K step.
 
 
 
     def forward(self, past_K_history, *args, **kwargs):
         return self.conditional_sample(past_K_history, *args, **kwargs) # TODO: repaint sampling... 
+    
+
+
+
+    # flavors1: raw, no condition on first state, action and test with added loss weight
+    # 2 condition on first state and rtg
+    # differiented reward function...
+    # conditioned on returns
+    # conditioned on mode ( exploration, task inference, planning) or: task planning and exploration

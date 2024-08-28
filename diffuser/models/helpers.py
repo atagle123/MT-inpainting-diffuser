@@ -153,9 +153,10 @@ def apply_conditioning(x, conditions, action_dim):
 
 class WeightedLoss(nn.Module):
 
-    def __init__(self, action_dim):
+    def __init__(self,loss_weights, action_dim):
         super().__init__()
         self.action_dim = action_dim
+        self.loss_weights=loss_weights
 
     def forward(self, pred, targ, weights):
         '''
@@ -163,8 +164,8 @@ class WeightedLoss(nn.Module):
                 [ batch_size x horizon x transition_dim ]
         '''
         loss = self._loss(pred, targ)  # (B,H,T)
-        weighted_loss = (loss * weights).mean() # (B,H,T)->(1)
-        #a0_loss = (loss[:, 0, :self.action_dim] / self.weights[0, :self.action_dim]).mean() # TODO: Aaca ver ... 
+        weighted_loss = (loss * self.loss_weights).mean() # (B,H,T)->(1)
+        #a0_loss = (loss[:, 0, :self.action_dim] / self.weights[0, :self.action_dim]).mean() # comentado para ahorrar tiempo... 
         return weighted_loss#, {'a0_loss': a0_loss}
 
 

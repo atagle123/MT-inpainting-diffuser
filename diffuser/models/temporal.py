@@ -200,7 +200,7 @@ class TemporalUnet_task(nn.Module):
     """
     Task inference specific temporal u net, with no conditioning.
     """ 
-    #TODO use cross attention... 
+    #TODO use cross attention...  and add task dimension... 
 
     def __init__(
         self,
