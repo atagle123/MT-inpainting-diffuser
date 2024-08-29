@@ -123,7 +123,9 @@ MAZE_BOUNDS = {
 class MazeRenderer:
 
     def __init__(self, env):
-        if type(env) is str: env = load_environment(env)
+        """
+        env is a gym instance... 
+        """
         self._config = env._config
         self._background = self._config != ' '
         self._remove_margins = False

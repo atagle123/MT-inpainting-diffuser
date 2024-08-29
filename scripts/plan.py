@@ -166,7 +166,7 @@ rollouts.save_trajectories(filepath=os.path.join(savepath,f'rollout_{seed}.pkl')
 
 filename = f'rollout_video_{seed}.mp4'
 filepath=os.path.join(savepath,filename)
-writer = iio.get_writer(filepath, fps=20)
+writer = iio.get_writer(filepath, fps=env.metadata["render_fps"])
 
 frames=env.render()
 # Close the environment
