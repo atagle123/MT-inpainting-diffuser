@@ -406,7 +406,7 @@ class GaussianDiffusion_task(nn.Module):
 
         chain = [x] if return_chain else None  # TODO: condicionar a s0 si o no? 
         progress = utils.Progress(self.n_timesteps) if verbose else utils.Silent()
-        for i in reversed(range(0, self.n_timesteps)):
+        for i in reversed(range(0, self.n_timesteps)): # TODO repaint sampling ... 
             t = make_timesteps(batch_size, i, device)
             x = self.p_sample(self, x, t)
 
@@ -427,7 +427,7 @@ class GaussianDiffusion_task(nn.Module):
         horizon = horizon or self.horizon
         shape = (batch_size, horizon, self.transition_dim)
 
-        return self.p_sample_loop(shape, **sample_kwargs) #   TODO add returns conditioning... 
+        return self.p_sample_loop(shape, **sample_kwargs)
 
     #------------------------------------------ training ------------------------------------------#
 
@@ -443,7 +443,6 @@ class GaussianDiffusion_task(nn.Module):
         return sample
 
     def p_losses(self, x_start, t):
-        #TODO: OJO QUE ACA PARA MTDIFF usan unos einops, ver esto... 
         noise = torch.randn_like(x_start)
 
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
@@ -452,25 +451,23 @@ class GaussianDiffusion_task(nn.Module):
         pred_epsilon = self.model(x_noisy,t)
 
         assert noise.shape == pred_epsilon.shape
-        loss_weights=self.get_mask_loss_weights(K_step_mask) # (B,)-> (B,H,T) # train by two modalities? task inference and planning?
-        loss, info = self.loss_fn(pred_epsilon, noise,loss_weights) # TODO: falta ver la funcion de loss... 
+
+        loss, info = self.loss_fn(pred_epsilon, noise)
 
         return loss, info
 
 
-    def loss(self, x, returns, *args): # maybe add task and actual K step.
-
-        batch_size = len(x) # TODO aca mtdiff hace algo con einops...
+    def loss(self, x): 
+    
+        batch_size = len(x) 
         t = torch.randint(0, self.n_timesteps, (batch_size,), device=x.device).long()
 
-
-
-        return self.p_losses(x, t) # TODO: maybe add task and actual K step.
+        return self.p_losses(x, t)
 
 
 
-    def forward(self, past_K_history, *args, **kwargs):
-        return self.conditional_sample(past_K_history, *args, **kwargs) # TODO: repaint sampling... 
+    def forward(self,traj_known,mask, *args, **kwargs):
+        return self.conditional_sample(traj_known,mask, *args, **kwargs) # TODO: repaint sampling... faltan hiperparametros del sampling... 
     
 
 

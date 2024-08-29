@@ -60,7 +60,7 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
     def make_dataset(self,normed_keys=['observations', 'actions']): 
         """
         Format: episodes_dict.keys-> ["observations","actions","rewards","terminations","truncations","total_returns"]
-                episodes_dict.values-> np.array 2d [H,Dim]  #revisar
+                episodes_dict.values-> np.array 2d [H,Dim]  #revisar  TODO add RTG as field and then normalize across the timestep. and tasks.  
         """
         episodes_generator = self.minari_dataset.iterate_episodes()
         episodes_dict={}
@@ -126,7 +126,7 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.indices)
 
-    def __getitem__(self, idx, eps=1e-4):
+    def __getitem__(self, idx):
         ep_id, start, end = self.indices[idx] # TODO make a numpy array consisting of idx-> returns... 
         episode=self.episodes[ep_id]  # normed episode # ojo con los id checkear que esten bien... 
 
