@@ -57,7 +57,7 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
         if self.include_returns: 
             self.make_returns() # TODO ver cuanto se demora
         
-    def make_dataset(self,normed_keys=['observations', 'actions']): 
+    def make_dataset(self,normed_keys=['observations', 'actions',"rewards"]): 
         """
         Format: episodes_dict.keys-> ["observations","actions","rewards","terminations","truncations","total_returns"]
                 episodes_dict.values-> np.array 2d [H,Dim]  #revisar  TODO add RTG as field and then normalize across the timestep. and tasks.  
@@ -79,7 +79,7 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
                     if episode.terminations.any():
                         episode_lenght=episode.total_timesteps
                         attribute[episode_lenght-1]+=self.termination_penalty  # o quizas -1 tambien sirve...
-                    
+                        
                 if key in normed_keys:
                     attribute=self.normalizer.normalize(attribute,key) # normalize
                 
@@ -141,7 +141,7 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
             """
                 Para normalizar, primero normalizar rewards (0,1), calcular reward to go de cada estado (cierto gamma), normalizar con formula de gammas... y tenemos el reward to go normalizados de todos los estados (deberian ser similares en treyactorias optimas), luego renormalizar rewards to go para q esten si o si en el rango 0,1 y (condicionar a eso...) despyues al hacer el mask condicionar el rtg desde el estado q se esta midiendo (quizas rtg promedio? o descontado tiene sentido hcaerlo para cada estado en todo caso)... y no desde toda la historia. 
             """
-            returns=episode['returns'] # deberia dar solo un valor..., ver si hacer el reward to go quizas, tiene mas sentido... 
+            returns=episode['returns'][start:] # deberia dar solo un valor..., ver si hacer el reward to go quizas, tiene mas sentido... 
             batch = RewardBatch(trajectories, returns) # probar esto, el contra argumento es que el las rewards pasadas pudieron haber sido buenas, lo q no implica q las futuras sean buenas. quizas condicionar en returns y reward to go... 
         else:
             batch = Batch(trajectories)

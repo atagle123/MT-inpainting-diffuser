@@ -110,88 +110,41 @@ def plot2img(fig, remove_margins=True):
 
 
 
-
-
-
-
-MAZE_BOUNDS = {
+def render_maze_2d(env,observations,goal_state):
+    """    MAZE_BOUNDS = {
     'maze2d-umaze-v1': (0, 5, 0, 5),
     'maze2d-medium-v1': (0, 8, 0, 8),
     'maze2d-large-v1': (0, 9, 0, 12)
-}
+    }"""
 
-class MazeRenderer:
+    maze_size_scaling=1
 
-    def __init__(self, env):
-        """
-        env is a gym instance... 
-        """
-        self._config = env._config
-        self._background = self._config != ' '
-        self._remove_margins = False
-        self._extent = (0, 1, 1, 0)
+    back=env.spec.kwargs["maze_map"]
+    plt.grid(True)
+    back=np.rot90(np.array(back), k=2).T
+    map_length = len(back)
+    map_width = len(back[0])
+    x_map_center = map_width / 2 * maze_size_scaling
+    y_map_center = map_length / 2 * maze_size_scaling
 
-    def renders(self, observations, conditions=None, title=None):
-        plt.clf()
-        fig = plt.gcf()
-        fig.set_size_inches(5, 5)
-        plt.imshow(self._background * .5,
-            extent=self._extent, cmap=plt.cm.binary, vmin=0, vmax=1)
+    plt.clf()
+    fig = plt.gcf()
 
-        path_length = len(observations)
-        colors = plt.cm.jet(np.linspace(0,1,path_length))
-        plt.plot(observations[:,1], observations[:,0], c='black', zorder=10)
-        plt.scatter(observations[:,1], observations[:,0], c=colors, zorder=20)
-        plt.axis('off')
-        plt.title(title)
-        img = plot2img(fig, remove_margins=self._remove_margins)
-        return img
+    extent = [
+        x_map_center - map_width ,  # Left
+        x_map_center ,  # Right
+        y_map_center - map_length , # Bottom
+        y_map_center   # Top
+    ]
 
-    def composite(self, savepath, paths, ncol=5, **kwargs):
-        '''
-            savepath : str
-            observations : [ n_paths x horizon x 2 ]
-        '''
-        assert len(paths) % ncol == 0, 'Number of paths must be divisible by number of columns'
+    plt.imshow(back,extent=extent,
+        cmap=plt.cm.binary, vmin=0, vmax=1)
 
-        images = []
-        for path, kw in zipkw(paths, **kwargs):
-            img = self.renders(*path, **kw)
-            images.append(img)
-        images = np.stack(images, axis=0)
-
-        nrow = len(images) // ncol
-        images = einops.rearrange(images,
-            '(nrow ncol) H W C -> (nrow H) (ncol W) C', nrow=nrow, ncol=ncol)
-        imageio.imsave(savepath, images)
-        print(f'Saved {len(paths)} samples to: {savepath}')
-
-class Maze2dRenderer(MazeRenderer):
-
-    def __init__(self, env, observation_dim=None):
-        self.env_name = env
-        self.env = load_environment(env)
-        self.observation_dim = np.prod(self.env.observation_space.shape)
-        self.action_dim = np.prod(self.env.action_space.shape)
-        self.goal = None
-        self._background = self.env.maze_arr == 10
-        self._remove_margins = False
-        self._extent = (0, 1, 1, 0)
-
-    def renders(self, observations, conditions=None, **kwargs):
-        bounds = MAZE_BOUNDS[self.env_name]
-
-        observations = observations + .5
-        if len(bounds) == 2:
-            _, scale = bounds
-            observations /= scale
-        elif len(bounds) == 4:
-            _, iscale, _, jscale = bounds
-            observations[:, 0] /= iscale
-            observations[:, 1] /= jscale
-        else:
-            raise RuntimeError(f'Unrecognized bounds for {self.env_name}: {bounds}')
-
-        if conditions is not None:
-            conditions /= scale
-        return super().renders(observations, conditions, **kwargs)
+    path_length = len(observations)
+    colors = plt.cm.jet(np.linspace(0,1,path_length))
+    plt.plot(goal_state[1], goal_state[0],marker='*', markersize=10, color='r', zorder=12)
+    plt.plot(observations[0,1], observations[0,0],marker='*', markersize=10, color='g', zorder=12)
+    plt.plot(observations[:,1], observations[:,0], c='black', zorder=11)
+    plt.scatter(observations[:,1], observations[:,0], c=colors, zorder=10)
+    plt.title("test")
+    plt.savefig('my_plot.png', dpi=300) #   TODO : save path
