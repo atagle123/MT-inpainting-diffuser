@@ -11,12 +11,17 @@ from diffuser.utils.arrays import atleast_2d,pad
 Batch = namedtuple('Batch', 'trajectories')
 RewardBatch = namedtuple('Batch', 'trajectories returns')
 
+TaskRewardBatch=namedtuple('Batch', 'trajectories returns task')
+
+
+
+##TODO agregar para que acepte el task... 
 
 class InpaintSequenceDataset(torch.utils.data.Dataset):
 
     def __init__(self, env_name='halfcheetah-expert-v0', horizon=64,
         normalizer="normalization.GaussianNormalizer", preprocess_fns=[], max_path_length=1000, # cambiar normalizer por true o false, ver si en un futuro usamos otros...
-        max_n_episodes=10000, termination_penalty=0, seed=None,use_padding=True, include_returns=True, normed_keys=['observations', 'actions','rewards'], p_mask=0.5,discount=0.99): 
+        max_n_episodes=10000, termination_penalty=0, seed=None,use_padding=True, include_returns=True, normed_keys=['observations', 'actions','rewards'],discount=0.99): 
         
         self.preprocess_fn = get_preprocess_fn(preprocess_fns, env_name)
         self.horizon = horizon
@@ -24,7 +29,6 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
         self.termination_penalty=termination_penalty
         self.use_padding=use_padding
         self.include_returns=include_returns
-        self.p_mask=p_mask
         self.discount=discount
 
         self.minari_dataset=minari.load_dataset(env_name)
@@ -141,13 +145,14 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
             """
                 Para normalizar, primero normalizar rewards (0,1), calcular reward to go de cada estado (cierto gamma), normalizar con formula de gammas... y tenemos el reward to go normalizados de todos los estados (deberian ser similares en treyactorias optimas), luego renormalizar rewards to go para q esten si o si en el rango 0,1 y (condicionar a eso...) despyues al hacer el mask condicionar el rtg desde el estado q se esta midiendo (quizas rtg promedio? o descontado tiene sentido hcaerlo para cada estado en todo caso)... y no desde toda la historia. 
             """
-            returns=episode['returns'][start:] # deberia dar solo un valor..., ver si hacer el reward to go quizas, tiene mas sentido... 
-            batch = RewardBatch(trajectories, returns) # probar esto, el contra argumento es que el las rewards pasadas pudieron haber sido buenas, lo q no implica q las futuras sean buenas. quizas condicionar en returns y reward to go... 
+            returns=self.traj_rtg[idx] # exp(rtg)
+
+            batch = RewardBatch(trajectories, returns)
+        
         else:
             batch = Batch(trajectories)
 
         return batch
-
 
 
     def __getstate__(self):
@@ -162,7 +167,7 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
         print('[ datasets/sequence ] Getting value dataset bounds...', end=' ', flush=True)
         vmin = np.inf
         vmax = -np.inf
-        for idx in range(len(self.traj_rtg)): # TODO hacer esto mas facil... 
+        for idx in range(len(self.traj_rtg)):
             value = self.traj_rtg[idx]
             vmin = min(value, vmin)
             vmax = max(value, vmax)
@@ -177,29 +182,41 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
         ## [0, 1]
         normed_values = (value - self.vmin) / (self.vmax - self.vmin)
         ## [-1, 1]
-       # normed_values = normed_values * 2 - 1
+        normed_values = normed_values * 2 - 1
 
         normed_values = np.array([normed_values], dtype=np.float32)
         return normed_values
 
-    def make_returns(self,): # TODO idea gamma deberia ser el mismo con el que se testea ... 
-        discount_array=self.discount ** np.arange(self.max_path_length) # (H)
+    def make_returns(self): # TODO idea gamma deberia ser el mismo con el que se testea ... 
+        #discount_array=self.discount ** np.arange(self.max_path_length) # (H)
 
         self.traj_rtg={} # hacer un np array quizas... 
-        for ep_id, start, end in self.indices:
-            episode=self.episodes[ep_id]  # normed episode # ojo con los id checkear que esten bien... 
-            rewards=episode['rewards'][start:] # norm rtg of thw trajectory
-            discount_rew=rewards*discount_array[:-start] # (H)*(H)-> H #TODO check this
-            self.traj_rtg[idx]=discount_rew.sum() #H->1 # TODO falta normnalizar por el gamma y todo... # quizas no usar gamma... 
+        for idx,(ep_id, start, end) in enumerate(self.indices):
+            episode=self.episodes[ep_id]  
+            rewards=episode['rewards'][start:] 
+            
+            norm_rtg=self.calculate_norm_rtg(rewards,discount=self.discount) # es enecesario normalizar rtg 
 
-        # Norm new values... if the highest value is not 1.
-        self.nromed=False
+            self.traj_rtg[idx]=np.exp(norm_rtg)
 
-        for idx in range(len(self.traj_rtg)):
+        self.normed=False
 
-            self.traj_rtg[idx]=self.normalize_value(value)
+        for idx,rtg in self.traj_rtg.items():
+
+            self.traj_rtg[idx]=self.normalize_value(rtg)
             
 
+    def calculate_norm_rtg(self,rewards,discount):
+            horizon=len(rewards)
+            discount_array=discount ** np.arange(horizon) # (H)
+
+            discount_rew=rewards*discount_array # (H)*(H)-> H #TODO check this
+
+            rtg=discount_rew.sum()
+
+            norm_factor=(1-discount)/(1-discount**(horizon+1))
+            norm_rtg=rtg*norm_factor
+            return(norm_rtg)
 
 
 
