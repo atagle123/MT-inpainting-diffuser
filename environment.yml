@@ -12,7 +12,7 @@ dependencies:
     - gymnasium==0.29.1
     - gymnasium-robotics==1.2.4
     - mujoco<3.0.0
-    - minari==0.5.0
+    - minari[gcs]==0.5.0
     - wandb==0.17.3
     - einops==0.8.0
     - scipy>=1.4.1
