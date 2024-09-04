@@ -51,11 +51,10 @@ def find_key_in_data(data, key_to_find):
     result=recursive_search(data)
     return result
 
-##TODO agregar para que acepte el task... 
 
 class InpaintSequenceDataset(torch.utils.data.Dataset):
 
-    def __init__(self, env_name='halfcheetah-expert-v0', horizon=64,
+    def __init__(self, dataset_name='halfcheetah-expert-v0', horizon=64,
         normalizer="normalization.GaussianNormalizer", max_path_length=1000, # cambiar normalizer por true o false, ver si en un futuro usamos otros...
         max_n_episodes=100000, termination_penalty=0, seed=None,use_padding=True,view_keys=['observations', 'actions','rewards'], normed_keys=['observations', 'actions','rewards'],discount=0.99): 
         
@@ -64,8 +63,9 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
         self.termination_penalty=termination_penalty
         self.use_padding=use_padding
         self.discount=discount
+        self.normed_keys=normed_keys
 
-        self.minari_dataset=minari.load_dataset(env_name)
+        self.minari_dataset=minari.load_dataset(dataset_name)
         self.minari_dataset.set_seed(seed=seed)
         self.env = self.minari_dataset.recover_environment()
         action_space=self.env.action_space
@@ -86,11 +86,13 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
         self.make_dataset(view_keys=view_keys)
         self.make_indices(horizon)
 
-        self.make_returns() # TODO ver cuanto se demora ver donde poner... antes de normalize dataset... 
+        self.make_returns()
 
-        self.normalize_dataset(normed_keys=normed_keys,normalizer=import_class(normalizer))
+        self.normalize_dataset(normed_keys=self.normed_keys,normalizer=import_class(normalizer))
+
+        self.sanity_test() # TODO 
         
-    def make_dataset(self,view_keys,normed_keys=['observations', 'actions',"rewards"]):
+    def make_dataset(self,view_keys):
         """
         Transforms minari dataset to a standard way... 
 
@@ -98,7 +100,7 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
                 episodes_dict.values-> np.array 2d [H,Dim]  #revisar  TODO add RTG as field and then normalize across the timestep. and tasks.  
         """ 
         episodes_generator = self.minari_dataset.iterate_episodes()
-        episodes_dict={}
+        self.episodes={}
         ### generate new dataset in the format ###
         # TODO agregar un truncador de observaciones si es que son una dim mas que las acciones... considerar tambien el caso del maze2d 
         # TODO maybe change name of observation to observations... 
@@ -123,9 +125,8 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
                         
                 
                 dict[key]=attribute
-            episodes_dict[episode.id]=dict
 
-        self.episodes=episodes_dict
+            self.episodes[episode.id]=dict
 
     def normalize_dataset(self,normed_keys,normalizer):
         self.normalizer=normalizer(dataset=self.episodes,normed_keys=normed_keys,use_padding=self.use_padding,max_len=self.max_path_length)
@@ -170,27 +171,25 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
 
     
     def inference_mode(self):
-        del self.episodes; del self.indices; del self.normalizer.minari_dataset  #save memory
+        del self.episodes; del self.indices; del self.normalizer.minari_dataset  #save memory TODO check this... 
 
 
     def __len__(self):
         return len(self.indices)
 
     def __getitem__(self, idx):
-        ep_id, start, end = self.indices[idx] # TODO make a numpy array consisting of idx-> returns... 
-        episode=self.episodes[ep_id]  # normed episode # ojo con los id checkear que esten bien... 
+        ep_id, start, end = self.indices[idx] 
+        episode=self.episodes[ep_id]  
 
-        observations = episode['observations'][start:end]
+        observations = episode['observations'][start:end] # TODO make this generalizable using view_keys ore something like that... 
         actions = episode['actions'][start:end]
         rewards=episode['rewards'][start:end]
+        returns=episode["returns"][start:end]
+        task=episode["desired_goal"][start:end]
 
+        trajectories = np.concatenate([actions, observations,rewards,task,returns], axis=-1) # check this
 
-        trajectories = np.concatenate([actions, observations,rewards], axis=-1) # check this
-
-
-        returns=self.traj_rtg[idx] # exp(rtg)
-
-        batch = RewardBatch(trajectories, returns)
+        batch = Batch(trajectories)
 
         return batch
 
@@ -213,16 +212,13 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
                 norm_rtg=self.calculate_norm_rtg(future_rewards,discount=self.discount) # es enecesario normalizar rtg 
                 rtg.append(np.exp(norm_rtg)) # TODO CHeck this
             
-            self.episodes[ep_id]["returns"]=np.array(rtg)
+            returns_array=np.array(rtg,dtype=np.float32)
 
-          #  assert #check dims TODO 
+            assert returns_array.shape==rewards.shape
 
-        self.normed=False
-        values_normalizer=LimitsNormalizer(dataset=self.episodes,normed_keys="returns",use_padding=False,max_len=10000)
-        
-        for ep_id, dict in self.episodes.items():
-            rtg_array=self.episodes[ep_id]["returns"]
-            self.episodes[ep_id]["returns"]=values_normalizer.normalize(rtg_array,"returns") # TODO maybe use normalization?
+            self.episodes[ep_id]["returns"]=returns_array
+
+        self.normed_keys.append("returns")
 
     
             
