@@ -6,41 +6,36 @@ from diffuser.utils.arrays import atleast_2d
 #-----------------------------------------------------------------------------#
 
 class Normalizer:
-    def __init__(self,minari_dataset,keys,use_padding,max_len):
-        self.minari_dataset=minari_dataset
+    def __init__(self,dataset,normed_keys,use_padding,max_len):
+        self.dataset=dataset
         self.use_padding=use_padding
         self.max_len=max_len
-        self.make_params(keys=keys)
+        self.make_params(normed_keys=normed_keys)
 
-    def make_params(self,keys=['observations', 'actions']):
+    def make_params(self,normed_keys=['observations', 'actions']):
 
-        dict_of_list = {key: [] for key in keys} # cambiar nombre
+        dict_of_list = {key: [] for key in normed_keys} # cambiar nombre
         
-        episodes_generator = self.minari_dataset.iterate_episodes()
-
         ### Calculate means and std and normalize dataset ###
-        for episode in episodes_generator:
-            for key in keys:
-                attribute=getattr(episode,key)
+        for ep_id, dict in self.dataset.items():
+            for key,attribute in dict.items():
                 attribute=atleast_2d(attribute)
-
                # if self.use_padding:
     
                   #  attribute=pad(attribute,max_len=self.max_len)
+                if key in normed_keys:
+                    dict_of_list[key].append(attribute)
 
-                dict_of_list[key].append(attribute)
-
-        params_dict={}
-        for key in keys:
-            dict_of_list[key]=np.concatenate(dict_of_list[key]) # all episodes concatenated
+        self.params_dict={}
+        for key in normed_keys:
+            concat_episodes_key=np.concatenate(dict_of_list[key]) # all episodes concatenated
             #dict_of_list[key]=dict_of_list[key].astype(np.float32)
-            mean=dict_of_list[key].mean(axis=0)
-            std=dict_of_list[key].std(axis=0)  #ojo con el dtype
-            min=dict_of_list[key].min(axis=0)
-            max=dict_of_list[key].max(axis=0)
-            params_dict[key]={"mean":mean,"std":std,"min":min,"max":max}
+            mean=concat_episodes_key.mean(axis=0)
+            std=concat_episodes_key.std(axis=0)  #ojo con el dtype
+            min=concat_episodes_key.min(axis=0)
+            max=concat_episodes_key.max(axis=0)
+            self.params_dict[key]={"mean":mean,"std":std,"min":min,"max":max}
 
-        self.params_dict=params_dict
     
     def __call__(self, x, key):
         return self.normalize(x, key)
@@ -60,14 +55,11 @@ class GaussianNormalizer(Normalizer):
         normalizes to zero mean and unit variance
     '''
 
-    def __init__(self, minari_dataset,keys,use_padding,max_len):
-        super().__init__(minari_dataset,keys,use_padding,max_len)
-        self.field_normalizer={}
+    def __init__(self,dataset,normed_keys,use_padding,max_len):
+        super().__init__(dataset,normed_keys,use_padding,max_len)
 
     def normalize(self,unnormed_data, key):
         
-        self.field_normalizer[key]="gaussian"
-
         normed_data=(unnormed_data-self.params_dict[key]["mean"])/self.params_dict[key]["std"]
 
         return(normed_data)
@@ -80,7 +72,7 @@ class GaussianNormalizer(Normalizer):
         return(unnormed_data)
     
     def normalize_torch(self,unnormed_data,key,device="cuda:0"):
-        #self.field_normalizer[key]="gaussian"
+        
         torch_mean=torch.from_numpy(self.params_dict[key]["mean"]).to(unnormed_data.device)
         torch_std=torch.from_numpy(self.params_dict[key]["std"]).to(unnormed_data.device)
         
@@ -102,23 +94,17 @@ class GaussianNormalizer(Normalizer):
         return(unnormed_data)
 
     
-    def get_field_normalizers(self):
-        return(self.field_normalizer)
-    
 
 
 class LimitsNormalizer(Normalizer):
     '''
         maps [ xmin, xmax ] to [ -1, 1 ]
     '''
-    def __init__(self, minari_dataset,keys,use_padding,max_len):
-        super().__init__(minari_dataset,keys,use_padding,max_len)
-        self.field_normalizer={}
+    def __init__(self,dataset,normed_keys,use_padding,max_len):
+        super().__init__(dataset,normed_keys,use_padding,max_len)
     
     def normalize(self,unnormed_data, key): # TODO test... 
         
-        self.field_normalizer[key]="limits"
-
         ## [ 0, 1 ]
         normed_data=(unnormed_data-self.params_dict[key]["min"])/(self.params_dict[key]["max"] - self.params_dict[key]["min"])
         
@@ -174,9 +160,6 @@ class LimitsNormalizer(Normalizer):
 
         return normed_data * (torch_max- torch_min) + torch_min
 
-    
-    def get_field_normalizers(self):
-        return(self.field_normalizer)
     
 class SafeLimitsNormalizer(LimitsNormalizer):
     '''
