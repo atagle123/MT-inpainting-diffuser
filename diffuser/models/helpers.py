@@ -146,26 +146,25 @@ def apply_conditioning(x, conditions, action_dim):
         x[:, t, action_dim:] = val.clone()
     return x
 
+def apply_mask(x,x_unmasked,mask):
+    raise NotImplementedError
 
 #-----------------------------------------------------------------------------#
 #---------------------------------- losses -----------------------------------#
 #-----------------------------------------------------------------------------#
 
 class WeightedLoss(nn.Module):
-
-    def __init__(self,loss_weights, action_dim):
+    def __init__(self):
         super().__init__()
-        self.action_dim = action_dim
-        self.loss_weights=loss_weights
 
-    def forward(self, pred, targ, weights):
+    def forward(self, pred, targ, loss_weights):
         '''
             pred, targ : tensor
                 [ batch_size x horizon x transition_dim ]
         '''
         loss = self._loss(pred, targ)  # (B,H,T)
-        weighted_loss = (loss * self.loss_weights).mean() # (B,H,T)->(1)
-        #a0_loss = (loss[:, 0, :self.action_dim] / self.weights[0, :self.action_dim]).mean() # comentado para ahorrar tiempo... 
+        weighted_loss = (loss * loss_weights).mean() # (B,H,T)->(1)
+        #a0_loss = (loss[:, 0, self.action_dim] / self.weights[0, :self.action_dim]).mean() # comentado para ahorrar tiempo... 
         return weighted_loss#, {'a0_loss': a0_loss}
 
 

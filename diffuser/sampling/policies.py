@@ -64,6 +64,7 @@ class Policy:
         self.diffusion_model = diffusion_model
         self.dataset = dataset # dataset is a instance of the class sequence dataset
         self.action_dim = diffusion_model.action_dim
+        self.observation_dim = diffusion_model.observation_dim
         self.preprocess_fn = get_policy_preprocess_fn(preprocess_fns)
         self.gamma=gamma
         self.sample_kwargs = sample_kwargs
@@ -91,7 +92,7 @@ class Policy:
         normed_actions = trajectories[:, :, :self.action_dim]
         actions = self.dataset.normalizer.unnormalize_torch(normed_actions, 'actions') # normalizar solo acciones y observaciones ... aunque tambien se podrian normalizar las rewards... probar esto... 
 
-        normed_observations = trajectories[:, :, self.action_dim:-1] 
+        normed_observations = trajectories[:, :, self.action_dim:self.observation_dim] 
         observations = self.dataset.normalizer.unnormalize_torch(normed_observations, 'observations')
 
         #IMPIORTANTE: CORTAR ACA POR no inpaint step ...

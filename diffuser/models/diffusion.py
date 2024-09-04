@@ -274,14 +274,15 @@ class GaussianDiffusion_task_rtg(nn.Module):
     """
     DDPM algorithm with 2 modes, task inference (unmasked plan) or policy sampling (masked plan and unmasked task) 
     """
-    def __init__(self, model, horizon, observation_dim, action_dim, n_timesteps=1000,
+    def __init__(self, model, horizon, observation_dim, action_dim,task_dim, n_timesteps=1000,
         loss_type='l2', clip_denoised=True,
         action_weight=1.0, loss_discount=1.0,p_mode=0.5):
         super().__init__()
         self.horizon = horizon
         self.observation_dim = observation_dim
         self.action_dim = action_dim
-        self.transition_dim = observation_dim + action_dim+1 # (S+A+R+G+rtg)
+        self.task_dim=task_dim
+        self.transition_dim = observation_dim + action_dim+1+task_dim+1 # (S+A+R+G+rtg)
         self.model = model
         self.action_weight=action_weight
         self.loss_discount=loss_discount
@@ -322,7 +323,7 @@ class GaussianDiffusion_task_rtg(nn.Module):
         self.bernoulli_dist = torch.distributions.Bernoulli(p_mode)
 
         loss_weights = self.get_loss_weights(action_weight, loss_discount)
-        self.loss_fn = Losses[loss_type](loss_weights, self.action_dim)
+        self.loss_fn = Losses[loss_type]()
 
     def get_loss_weights(self, action_weight, discount):
         '''
@@ -346,6 +347,7 @@ class GaussianDiffusion_task_rtg(nn.Module):
 
         ## manually set a0 weight
         loss_weights[0, :self.action_dim] = action_weight
+        loss_weights[0, self.action_dim:self.observation_dim] = 0
         return loss_weights
 
     #------------------------------------------ sampling ------------------------------------------#
@@ -450,16 +452,19 @@ class GaussianDiffusion_task_rtg(nn.Module):
         noise = torch.randn_like(x_start)
 
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
-        
-        x_noisy = apply_conditioning(x_noisy, cond, self.action_dim) # ver si aplicar conditioning... TODO probar con y sin... 
+        mode=1# (B,1) 0 o 1...
+        #mask= (B,H,T) same dims as x 
+        #x_noisy=x_noisy*mask+x_start*(1-mask)
+        x_noisy = apply_conditioning(x_start, cond, self.action_dim) # TODO ver conditioning... 
+        #loss_weights=mask*loss_weights... 
 #TODO APLICAR RANDOM CONDITIONING PARA LOS MODOS... 
 # TODO ver para pasar multiples task y que dataset tenga bien repartidos los task... en metaworld 
-
-        pred_epsilon = self.model(x_noisy,t)
+        #mode...
+        pred_epsilon = self.model(x_noisy,t,mode)
 
         assert noise.shape == pred_epsilon.shape
 
-        loss, info = self.loss_fn(pred_epsilon, noise)
+        loss, info = self.loss_fn(pred_epsilon, noise,loss_weights) # use different losses deppending the mode... 
 
         return loss, info
 

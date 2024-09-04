@@ -21,14 +21,13 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
 
     def __init__(self, env_name='halfcheetah-expert-v0', horizon=64,
         normalizer="normalization.GaussianNormalizer", preprocess_fns=[], max_path_length=1000, # cambiar normalizer por true o false, ver si en un futuro usamos otros...
-        max_n_episodes=10000, termination_penalty=0, seed=None,use_padding=True, include_returns=True, normed_keys=['observations', 'actions','rewards'],discount=0.99): 
+        max_n_episodes=10000, termination_penalty=0, seed=None,use_padding=True, normed_keys=['observations', 'actions','rewards'],discount=0.99): 
         
         self.preprocess_fn = get_preprocess_fn(preprocess_fns, env_name)
         self.horizon = horizon
         self.max_path_length = max_path_length
         self.termination_penalty=termination_penalty
         self.use_padding=use_padding
-        self.include_returns=include_returns
         self.discount=discount
 
         self.minari_dataset=minari.load_dataset(env_name)
@@ -58,8 +57,7 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
         self.make_dataset(normed_keys=normed_keys)
         self.make_indices(horizon)
 
-        if self.include_returns: 
-            self.make_returns() # TODO ver cuanto se demora
+        self.make_returns() # TODO ver cuanto se demora
         
     def make_dataset(self,normed_keys=['observations', 'actions',"rewards"]): 
         """
@@ -141,16 +139,10 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
 
         trajectories = np.concatenate([actions, observations,rewards], axis=-1) # check this
 
-        if self.include_returns:
-            """
-                Para normalizar, primero normalizar rewards (0,1), calcular reward to go de cada estado (cierto gamma), normalizar con formula de gammas... y tenemos el reward to go normalizados de todos los estados (deberian ser similares en treyactorias optimas), luego renormalizar rewards to go para q esten si o si en el rango 0,1 y (condicionar a eso...) despyues al hacer el mask condicionar el rtg desde el estado q se esta midiendo (quizas rtg promedio? o descontado tiene sentido hcaerlo para cada estado en todo caso)... y no desde toda la historia. 
-            """
-            returns=self.traj_rtg[idx] # exp(rtg)
 
-            batch = RewardBatch(trajectories, returns)
-        
-        else:
-            batch = Batch(trajectories)
+        returns=self.traj_rtg[idx] # exp(rtg)
+
+        batch = RewardBatch(trajectories, returns)
 
         return batch
 
@@ -218,5 +210,46 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
             norm_rtg=rtg*norm_factor
             return(norm_rtg)
 
+
+
+class MAze2d_inpaint_dataset(InpaintSequenceDataset):
+
+     def make_dataset(self,normed_keys=['observations', 'actions',"rewards"]): 
+        """
+        Format: episodes_dict.keys-> ["observations","actions","rewards","terminations","truncations","total_returns"]
+                episodes_dict.values-> np.array 2d [H,Dim]  #revisar  TODO add RTG as field and then normalize across the timestep. and tasks.  
+        """
+        episodes_generator = self.minari_dataset.iterate_episodes()
+        episodes_dict={}
+        ### generate new dataset in the format ###
+
+        for episode in episodes_generator:
+            dict={}
+            for key in ["observations","actions","rewards","terminations","truncations"]:
+                attribute=getattr(episode,key)
+                
+                if key=="observations":
+                    """
+                    specific maze 2d data storing
+                    """
+
+
+                attribute_2d=atleast_2d(attribute)
+                attribute=pad(attribute_2d,max_len=self.max_path_length) #pad pad before than normalizer? and for all the keys
+
+                assert attribute.shape==(self.max_path_length,attribute_2d.shape[-1]) # check normalized dims 
+
+                if key=="rewards":  
+                    if episode.terminations.any():
+                        episode_lenght=episode.total_timesteps
+                        attribute[episode_lenght-1]+=self.termination_penalty  # o quizas -1 tambien sirve...
+                        
+                if key in normed_keys:
+                    attribute=self.normalizer.normalize(attribute,key) # normalize
+                
+                dict[key]=attribute
+            episodes_dict[episode.id]=dict
+
+        self.episodes=episodes_dict
 
 
