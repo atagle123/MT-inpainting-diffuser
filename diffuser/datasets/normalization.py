@@ -28,6 +28,7 @@ class Normalizer:
 
         self.params_dict={}
         for key in normed_keys:
+            print(f"Getting normalization params for {key} ...")
             concat_episodes_key=np.concatenate(dict_of_list[key]) # all episodes concatenated
             #dict_of_list[key]=dict_of_list[key].astype(np.float32)
             mean=concat_episodes_key.mean(axis=0)

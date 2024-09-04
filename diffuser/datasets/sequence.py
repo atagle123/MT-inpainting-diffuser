@@ -57,7 +57,7 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
 
     def __init__(self, env_name='halfcheetah-expert-v0', horizon=64,
         normalizer="normalization.GaussianNormalizer", max_path_length=1000, # cambiar normalizer por true o false, ver si en un futuro usamos otros...
-        max_n_episodes=100000, termination_penalty=0, seed=None,use_padding=True, normed_keys=['observations', 'actions','rewards'],discount=0.99): 
+        max_n_episodes=100000, termination_penalty=0, seed=None,use_padding=True,view_keys=['observations', 'actions','rewards'], normed_keys=['observations', 'actions','rewards'],discount=0.99): 
         
         self.horizon = horizon
         self.max_path_length = max_path_length
@@ -82,30 +82,29 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
             self.action_dim = action_space.shape[0]
 
         self.observation_dim = observation_space.shape[0]
-
-     #   normalizer=import_class(normalizer)
-        #self.normalizer=normalizer(self.minari_dataset,keys=normed_keys,use_padding=self.use_padding,max_len=self.max_path_length)
         
-        self.make_dataset(normed_keys=normed_keys)
+        self.make_dataset(view_keys=view_keys)
         self.make_indices(horizon)
 
-        self.make_returns() # TODO ver cuanto se demora
+        self.make_returns() # TODO ver cuanto se demora ver donde poner... antes de normalize dataset... 
+
+        self.normalize_dataset(normed_keys=normed_keys,normalizer=import_class(normalizer))
         
-    def make_dataset(self,normed_keys=['observations', 'actions',"rewards"]):
+    def make_dataset(self,view_keys,normed_keys=['observations', 'actions',"rewards"]):
         """
         Transforms minari dataset to a standard way... 
 
         Format: episodes_dict.keys-> ["observations","actions","rewards","terminations","truncations","total_returns"]
                 episodes_dict.values-> np.array 2d [H,Dim]  #revisar  TODO add RTG as field and then normalize across the timestep. and tasks.  
-        """ # view_keys=[]
+        """ 
         episodes_generator = self.minari_dataset.iterate_episodes()
         episodes_dict={}
         ### generate new dataset in the format ###
-
+        # TODO agregar un truncador de observaciones si es que son una dim mas que las acciones... considerar tambien el caso del maze2d 
+        # TODO maybe change name of observation to observations... 
         for episode in episodes_generator:
             dict={}
-            for key in ["observations","actions","rewards","terminations","truncations"]:
-
+            for key in view_keys:
                 try:
                     attribute=find_key_in_data(episode,key)
 
@@ -122,13 +121,24 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
                         episode_lenght=episode.total_timesteps
                         attribute[episode_lenght-1]+=self.termination_penalty  # o quizas -1 tambien sirve...
                         
-                if key in normed_keys:
-                    attribute=self.normalizer.normalize(attribute,key) # normalize
                 
                 dict[key]=attribute
             episodes_dict[episode.id]=dict
 
         self.episodes=episodes_dict
+
+    def normalize_dataset(self,normed_keys,normalizer):
+        self.normalizer=normalizer(dataset=self.episodes,normed_keys=normed_keys,use_padding=self.use_padding,max_len=self.max_path_length)
+
+        for ep_id, dict in self.episodes.items():
+            for key,attribute in dict.items():
+
+                if key in normed_keys:
+                    attribute=self.normalizer.normalize(attribute,key) # normalize
+
+                    dict[key]=attribute
+
+            self.episodes[ep_id]=dict # TODO check this... 
 
     def make_indices(self, horizon):
         '''
@@ -136,15 +146,13 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
             each index maps to a datapoint
         '''
         indices = []
-
-        episodes_generator = self.minari_dataset.iterate_episodes() # quizas aca usar el dict, aunque si esta bien implementado no deberian haber errores
         
-        for episode in episodes_generator:  # assumes padding fix it to use no padding
+        for ep_id,episode_dict in self.episodes.items():  # assumes padding fix it to use no padding
             
-            episode_lenght=episode.total_timesteps
+            episode_lenght=len(episode_dict["actions"])   # uses actions as reference TODO check this... 
+
             assert self.max_path_length>=episode_lenght
             
-
             max_start = min(episode_lenght - 1, self.max_path_length - horizon)
 
             if not self.use_padding:
@@ -154,8 +162,8 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
                 assert episode_lenght>=horizon
 
             for start in range(max_start+1):
-                end = start + horizon  
-                indices.append((episode.id, start, end))
+                end = start + horizon
+                indices.append((ep_id, start, end))
 
         indices = np.array(indices)
         self.indices=indices
@@ -221,7 +229,7 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
 
     def make_returns(self): # TODO idea gamma deberia ser el mismo con el que se testea ... 
         #discount_array=self.discount ** np.arange(self.max_path_length) # (H)
-
+        # hacerlo por episode ... 
         self.traj_rtg={} # hacer un np array quizas... 
         for idx,(ep_id, start, end) in enumerate(self.indices):
             episode=self.episodes[ep_id]  
