@@ -270,15 +270,18 @@ class GaussianDiffusion(nn.Module):
 
 
 
-class GaussianDiffusion_task(nn.Module):
+class GaussianDiffusion_task_rtg(nn.Module):
+    """
+    DDPM algorithm with 2 modes, task inference (unmasked plan) or policy sampling (masked plan and unmasked task) 
+    """
     def __init__(self, model, horizon, observation_dim, action_dim, n_timesteps=1000,
         loss_type='l2', clip_denoised=True,
-        action_weight=1.0, loss_discount=1.0):
+        action_weight=1.0, loss_discount=1.0,p_mode=0.5):
         super().__init__()
         self.horizon = horizon
         self.observation_dim = observation_dim
         self.action_dim = action_dim
-        self.transition_dim = observation_dim + action_dim+3 # (S+A+R+G)
+        self.transition_dim = observation_dim + action_dim+1 # (S+A+R+G+rtg)
         self.model = model
         self.action_weight=action_weight
         self.loss_discount=loss_discount
@@ -316,6 +319,7 @@ class GaussianDiffusion_task(nn.Module):
             (1. - alphas_cumprod_prev) * np.sqrt(alphas) / (1. - alphas_cumprod))
 
         ## get loss coefficients and initialize objective
+        self.bernoulli_dist = torch.distributions.Bernoulli(p_mode)
 
         loss_weights = self.get_loss_weights(action_weight, loss_discount)
         self.loss_fn = Losses[loss_type](loss_weights, self.action_dim)
@@ -446,7 +450,10 @@ class GaussianDiffusion_task(nn.Module):
         noise = torch.randn_like(x_start)
 
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
-        #x_noisy = apply_conditioning(x_noisy, cond, self.action_dim) # ver si aplicar conditioning... TODO probar con y sin... 
+        
+        x_noisy = apply_conditioning(x_noisy, cond, self.action_dim) # ver si aplicar conditioning... TODO probar con y sin... 
+#TODO APLICAR RANDOM CONDITIONING PARA LOS MODOS... 
+# TODO ver para pasar multiples task y que dataset tenga bien repartidos los task... en metaworld 
 
         pred_epsilon = self.model(x_noisy,t)
 
@@ -459,7 +466,7 @@ class GaussianDiffusion_task(nn.Module):
 
     def loss(self, x): 
     
-        batch_size = len(x) 
+        batch_size = len(x)
         t = torch.randint(0, self.n_timesteps, (batch_size,), device=x.device).long()
 
         return self.p_losses(x, t)
