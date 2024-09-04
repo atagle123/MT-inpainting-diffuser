@@ -2,7 +2,7 @@ from collections import namedtuple
 import numpy as np
 import torch
 import gymnasium as gym
-from .normalization import GaussianNormalizer
+from .normalization import GaussianNormalizer,LimitsNormalizer
 from .preprocessing import get_preprocess_fn
 import minari
 from diffuser.utils.config import import_class
@@ -201,49 +201,30 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
     def __setstate__(self, d):
      print("I'm being unpickled with these values: " + repr(d))
      self.__dict__ = d
-
-
-    def _get_bounds(self):
-        print('[ datasets/sequence ] Getting value dataset bounds...', end=' ', flush=True)
-        vmin = np.inf
-        vmax = -np.inf
-        for idx in range(len(self.traj_rtg)):
-            value = self.traj_rtg[idx]
-            vmin = min(value, vmin)
-            vmax = max(value, vmax)
-        print('✓')
-        return vmin, vmax
     
-
-    def normalize_value(self, value):  # ojo que normaliza los valores, no las rewards, es sobre las trayctorias
-        if not self.normed:
-            self.vmin, self.vmax = self._get_bounds()
-            self.normed = True
-        ## [0, 1]
-        normed_values = (value - self.vmin) / (self.vmax - self.vmin)
-        ## [-1, 1]
-        normed_values = normed_values * 2 - 1
-
-        normed_values = np.array([normed_values], dtype=np.float32)
-        return normed_values
 
     def make_returns(self): # TODO idea gamma deberia ser el mismo con el que se testea ... 
         #discount_array=self.discount ** np.arange(self.max_path_length) # (H)
-        # hacerlo por episode ... 
-        self.traj_rtg={} # hacer un np array quizas... 
-        for idx,(ep_id, start, end) in enumerate(self.indices):
-            episode=self.episodes[ep_id]  
-            rewards=episode['rewards'][start:] # ojo que aca estaqn norm... 
+        for ep_id, dict in self.episodes.items():
+            rtg=[]
+            rewards=dict["rewards"]
+            for i in range(len(rewards)):
+                future_rewards=rewards[i:]
+                norm_rtg=self.calculate_norm_rtg(future_rewards,discount=self.discount) # es enecesario normalizar rtg 
+                rtg.append(np.exp(norm_rtg)) # TODO CHeck this
             
-            norm_rtg=self.calculate_norm_rtg(rewards,discount=self.discount) # es enecesario normalizar rtg 
+            self.episodes[ep_id]["returns"]=np.array(rtg)
 
-            self.traj_rtg[idx]=np.exp(norm_rtg)
+          #  assert #check dims TODO 
 
         self.normed=False
+        values_normalizer=LimitsNormalizer(dataset=self.episodes,normed_keys="returns",use_padding=False,max_len=10000)
+        
+        for ep_id, dict in self.episodes.items():
+            rtg_array=self.episodes[ep_id]["returns"]
+            self.episodes[ep_id]["returns"]=values_normalizer.normalize(rtg_array,"returns") # TODO maybe use normalization?
 
-        for idx,rtg in self.traj_rtg.items():
-
-            self.traj_rtg[idx]=self.normalize_value(rtg)
+    
             
 
     def calculate_norm_rtg(self,rewards,discount):
@@ -260,45 +241,6 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
 
 
 
-class MAze2d_inpaint_dataset(InpaintSequenceDataset):
-
-     def make_dataset(self,normed_keys=['observations', 'actions',"rewards"]): 
-        """
-        Format: episodes_dict.keys-> ["observations","actions","rewards","terminations","truncations","total_returns"]
-                episodes_dict.values-> np.array 2d [H,Dim]  #revisar  TODO add RTG as field and then normalize across the timestep. and tasks.  
-        """
-        episodes_generator = self.minari_dataset.iterate_episodes()
-        episodes_dict={}
-        ### generate new dataset in the format ###
-
-        for episode in episodes_generator:
-            dict={}
-            for key in ["observations","actions","rewards","terminations","truncations"]:
-                attribute=getattr(episode,key)
-
-                if key=="observations":
-                    """
-                    specific maze 2d data storing
-                    """
-                    attribute=attribute["observation"]
-
-
-                attribute_2d=atleast_2d(attribute)
-                attribute=pad(attribute_2d,max_len=self.max_path_length) #pad pad before than normalizer? and for all the keys
-
-                assert attribute.shape==(self.max_path_length,attribute_2d.shape[-1]) # check normalized dims 
-
-                if key=="rewards":  
-                    if episode.terminations.any():
-                        episode_lenght=episode.total_timesteps
-                        attribute[episode_lenght-1]+=self.termination_penalty  # o quizas -1 tambien sirve...
-                        
-                if key in normed_keys:
-                    attribute=self.normalizer.normalize(attribute,key) # normalize
-                
-                dict[key]=attribute
-            episodes_dict[episode.id]=dict
-
-        self.episodes=episodes_dict
+#class MAze2d_inpaint_dataset(InpaintSequenceDataset):
 
 
