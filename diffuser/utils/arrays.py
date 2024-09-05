@@ -148,6 +148,33 @@ def pad(array,max_len, pad_value=0):
 	
 	return padded_array
 
+def pad_min(array,min_len, pad_value=0):
+	"""
+	Pad_min the input array to a fixed length with a specified padding value.
+
+	Parameters:
+	- array: Input array (list or numpy array).
+	- max_len: Desired fixed length of the padded array.
+	- pad_value: Value used for padding (default is 0).
+
+	Returns:
+	- Padded array of length fixed_length.
+	"""
+
+	current_length = len(array)
+
+	if current_length >= min_len:
+		return array  # Return trimmed array if longer or equal
+	
+	pad_shape = (min_len - current_length,) + array.shape[1:]
+
+	# Create padding array filled with pad_value
+	padding = np.full(pad_shape, pad_value, dtype=array.dtype)
+	
+	# Concatenate original array and padding
+	padded_array = np.concatenate((array, padding), axis=0)
+	
+	return padded_array
 
 ### torch functions ###
 
