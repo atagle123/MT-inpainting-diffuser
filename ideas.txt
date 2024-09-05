@@ -1,4 +1,5 @@
 cosas que hacer:
-- debugear sequence dataset, ver calculate returns... 
+- debugear sequence dataset, ver calculate returns...  ✓
+- test get item and observationd desfase in observations
 - test normalization
 -

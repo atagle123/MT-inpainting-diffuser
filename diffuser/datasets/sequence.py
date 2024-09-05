@@ -224,8 +224,9 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
         print("Making returns... ")
 
         discount_array=self.discount ** np.arange(self.max_path_length) # (H)
+        discount_array=atleast_2d(discount_array) # (H,1)
         for ep_id, dict in self.episodes.items():
-            print(f"calc_return {ep_id}")
+           # print(f"calc_return {ep_id}")
             rtg=[]
             rewards=dict["rewards"]
             for i in range(len(rewards)):
@@ -237,11 +238,11 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
             returns_array=np.array(rtg,dtype=np.float32)
             assert returns_array.shape[0]==rewards.shape[0]
 
-            self.episodes[ep_id]["returns"]=returns_array
+            self.episodes[ep_id]["returns"]=atleast_2d(returns_array)
 
         self.normed_keys.append("returns")
 
-    def make_returns_fast(self): # TODO idea gamma deberia ser el mismo con el que se testea ... 
+    def make_returns_fast(self): # TODO idea gamma deberia ser el mismo con el que se testea ... ✓
         print("Making returns fast... ")
         
         discount_array=self.discount ** np.arange(self.max_path_length) # (H)
@@ -251,7 +252,7 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
             norm_factors.append(self.calc_norm_factor(self.discount,horizon)) # list with list[horizon]-> norm_factor(horizon)
 
         for ep_id, dict in self.episodes.items():
-            print(f"calc_return {ep_id}")
+           # print(f"calc_return {ep_id}")
             rtg_list=[]
             rewards=dict["rewards"]
             horizon=len(rewards)
@@ -269,7 +270,7 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
             returns_array=np.array(rtg_list[:-1],dtype=np.float32)
             assert returns_array.shape[0]==rewards.shape[0]
 
-            self.episodes[ep_id]["returns"]=returns_array
+            self.episodes[ep_id]["returns"]=atleast_2d(returns_array)
 
         self.normed_keys.append("returns")
 
@@ -281,7 +282,7 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
 
     def calculate_norm_rtg(self,rewards,horizon,discount,discount_array):
 
-            rtg=np.sum(rewards*discount_array) # (H)*(H)-> 1 #TODO check this
+            rtg=np.sum(rewards*discount_array) # (H,1)*(H,1)-> 1 #TODO check this
 
             norm_factor=(1-discount)/(1-discount**(horizon+1))
             norm_rtg=rtg*norm_factor
@@ -329,5 +330,21 @@ class Maze2d_inpaint_dataset(InpaintSequenceDataset):
         self.normalize_dataset(normed_keys=self.normed_keys,normalizer=import_class(normalizer))
 
       #  self.sanity_test() # TODO 
+
+    def __getitem__(self, idx):
+        ep_id, start, end = self.indices[idx] 
+        episode=self.episodes[ep_id]  
+
+        observations = episode['observation'][start:end] # TODO make this generalizable using view_keys ore something like that... 
+        actions = episode['actions'][start:end]
+        rewards=episode['rewards'][start:end]
+        returns=episode["returns"][start:end]
+        task=episode["desired_goal"][start:end]
+
+        trajectories = np.concatenate([actions, observations,rewards,task,returns], axis=-1) # check this
+
+        batch = Batch(trajectories)
+
+        return batch
 
 
