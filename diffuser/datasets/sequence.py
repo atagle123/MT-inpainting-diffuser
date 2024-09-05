@@ -73,6 +73,7 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
         self.use_padding=use_padding
         self.discount=discount
         self.normed_keys=normed_keys
+        self.view_keys=view_keys
 
         self.minari_dataset=minari.load_dataset(dataset_name)
         self.minari_dataset.set_seed(seed=seed)
@@ -175,8 +176,8 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
             max_start = min(episode_lenght - 1, self.max_path_length - horizon)
 
             if not self.use_padding:
-   
-                max_start = min(episode_lenght - horizon,self.max_path_length - horizon) # if episode lenght<horizon max start will be negative, doesnt have much sense use padding when episodes are truncated
+
+                max_start = min(episode_lenght - horizon,self.max_path_length - horizon) # assumes thath the min lenght is horizon... 
                 
                 assert episode_lenght>=horizon
 
@@ -257,7 +258,7 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
             rewards=dict["rewards"]
             horizon=len(rewards)
            # print(rewards*discount_array[:horizon])
-            rtg_partial=np.sum(rewards*discount_array[:horizon]) # (H)*(H)-> 1 #TODO check this
+            rtg_partial=np.sum(rewards*discount_array[:horizon]) # (H)*(H)-> 1 
             #print(rtg_partial*norm_factors[horizon],horizon,rewards,norm_factors[horizon])
             rtg_list.append(np.exp(rtg_partial*norm_factors[horizon]))
             for rew in rewards:
@@ -332,8 +333,8 @@ class Maze2d_inpaint_dataset(InpaintSequenceDataset):
       #  self.sanity_test() # TODO 
 
     def __getitem__(self, idx):
-        ep_id, start, end = self.indices[idx] 
-        episode=self.episodes[ep_id]  
+        ep_id, start, end = self.indices[idx]
+        episode=self.episodes[ep_id]
 
         observations = episode['observation'][start:end] # TODO make this generalizable using view_keys ore something like that... 
         actions = episode['actions'][start:end]
@@ -348,3 +349,18 @@ class Maze2d_inpaint_dataset(InpaintSequenceDataset):
         return batch
 
 
+
+"""    def __getitem__(self, idx):
+        ep_id, start, end = self.indices[idx]
+        episode=self.episodes[ep_id]
+        batch_list=[]
+
+        for key in self.view_keys:
+            batch_list.append(episode[key][start:end])
+
+
+        trajectories = np.concatenate(batch_list, axis=-1)
+
+        batch = Batch(trajectories)
+
+        return batch"""
