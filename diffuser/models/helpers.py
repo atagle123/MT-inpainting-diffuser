@@ -139,12 +139,6 @@ def cosine_beta_schedule(timesteps, s=0.008, dtype=torch.float32):
     betas_clipped = np.clip(betas, a_min=0, a_max=0.999)
     return torch.tensor(betas_clipped, dtype=dtype)
 
-def apply_conditioning(x, conditions, action_dim):
-    """ Function to apply conditioning in the observation dimension usually the conditioning is {0:current observation}
-    """
-    for t, val in conditions.items():
-        x[:, t, action_dim:] = val.clone()
-    return x
 
 def apply_mask(x,x_unmasked,mask):
     raise NotImplementedError
@@ -154,16 +148,17 @@ def apply_mask(x,x_unmasked,mask):
 #-----------------------------------------------------------------------------#
 
 class WeightedLoss(nn.Module):
-    def __init__(self):
+    def __init__(self,loss_weights):
         super().__init__()
+        self.loss_weights=loss_weights
 
-    def forward(self, pred, targ, loss_weights):
+    def forward(self, pred, targ):
         '''
             pred, targ : tensor
                 [ batch_size x horizon x transition_dim ]
         '''
         loss = self._loss(pred, targ)  # (B,H,T)
-        weighted_loss = (loss * loss_weights).mean() # (B,H,T)->(1)
+        weighted_loss = (loss * self.loss_weights).mean() # (B,H,T)->(1)
         #a0_loss = (loss[:, 0, self.action_dim] / self.weights[0, :self.action_dim]).mean() # comentado para ahorrar tiempo... 
         return weighted_loss#, {'a0_loss': a0_loss}
 

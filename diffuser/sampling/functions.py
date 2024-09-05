@@ -2,7 +2,6 @@ import torch
 
 from diffuser.models.helpers import (
     extract,
-    apply_conditioning,
 )
 
 

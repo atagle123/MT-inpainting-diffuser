@@ -2,10 +2,12 @@ cosas que hacer:
 - debugear sequence dataset, ver calculate returns...  ✓
 - test get item and observationd desfase in observations
 - test normalization
-- test dataloader fast...
 diffusion:
 - test temporal u net... ✓
 - add apply conditioning and loss weights to diffusion
-- test loss 
+- test loss weights
 - add sampling... 
 - test iter 
+- test mask
+- test sampling that makes sense
+- test where requires grad make sense... 

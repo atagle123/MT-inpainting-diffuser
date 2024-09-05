@@ -8,7 +8,6 @@ import diffuser.utils as utils
 from .helpers import (
     cosine_beta_schedule,
     extract,
-    apply_conditioning,
     Losses,
 )
 
@@ -267,7 +266,39 @@ class GaussianDiffusion(nn.Module):
         raise NotImplementedError
 
 """
+def get_mask_mode(horizon,transition_dim,task_dim,device="cuda"): # assumes the following order: A S R RTG T
+    mask_dict={}
 
+    # Crear el tensor de índices para la dimensión T
+    indices = torch.arange(transition_dim).unsqueeze(0)  # Dimensiones (1, 1, T)
+
+    ### 0 mask ###
+
+    mask_0 = (indices >= transition_dim-task_dim).float()  # (1, 1, T) 
+
+    # Expandir la máscara a las dimensiones deseadas (B, H, T)
+    mask_0 = mask_0.expand(horizon, transition_dim)  # (B, H, T)
+    mask_0=mask_0.to(device)
+    mask_dict[0]=mask_0 # action inference
+
+    ### 1 mask ###
+
+    # Comparar los índices con el umbral y crear la máscara
+    mask_1 = (indices < transition_dim-task_dim).float()  # (1, 1, T) -1 because the rtg is not a condition... TODO ver aca despues para el sampling si condicionar o no en el rtg..., no siempre esta disponible..  
+
+    # Expandir la máscara a las dimensiones deseadas (B, H, T)
+    mask_1 = mask_1.expand(horizon, transition_dim)  # (B, H, T)
+    mask_1= mask_1.to(device)
+
+    mask_dict[1]=mask_1 # task inference
+
+    return(mask_dict)
+
+
+def get_mask_from_batch(mode_batch,mask_dict):
+    stacked_values = torch.stack([mask_dict[0], mask_dict[1]])
+    result_tensor = stacked_values[mode_batch]
+    return(result_tensor)
 
 
 class GaussianDiffusion_task_rtg(nn.Module):
@@ -276,7 +307,7 @@ class GaussianDiffusion_task_rtg(nn.Module):
     """
     def __init__(self, model, horizon, observation_dim, action_dim,task_dim, n_timesteps=1000,
         loss_type='l2', clip_denoised=True,
-        action_weight=1.0, loss_discount=1.0,p_mode=0.5):
+        action_weight=1.0,rtg_weight=1.0, loss_discount=1.0,p_mode=0.5):
         super().__init__()
         self.horizon = horizon
         self.observation_dim = observation_dim
@@ -285,6 +316,7 @@ class GaussianDiffusion_task_rtg(nn.Module):
         self.transition_dim = observation_dim + action_dim+1+task_dim+1 # (S+A+R+G+rtg)
         self.model = model
         self.action_weight=action_weight
+        self.rtg_weight=rtg_weight
         self.loss_discount=loss_discount
 
         betas = cosine_beta_schedule(n_timesteps)
@@ -322,10 +354,11 @@ class GaussianDiffusion_task_rtg(nn.Module):
         ## get loss coefficients and initialize objective
         self.bernoulli_dist = torch.distributions.Bernoulli(p_mode)
 
-        loss_weights = self.get_loss_weights(action_weight, loss_discount)
-        self.loss_fn = Losses[loss_type]()
+        loss_weights = self.get_loss_weights(action_weight,rtg_weight, loss_discount) # TODO 
+        self.loss_fn = Losses[loss_type](loss_weights)
+        self.mask_dict=get_mask_mode(horizon,self.transition_dim,task_dim)
 
-    def get_loss_weights(self, action_weight, discount):
+    def get_loss_weights(self, action_weight, rtg_weight, discount):
         '''
             sets loss coefficients for trajectory
 
@@ -347,8 +380,13 @@ class GaussianDiffusion_task_rtg(nn.Module):
 
         ## manually set a0 weight
         loss_weights[0, :self.action_dim] = action_weight
+
+        # always conditioning on s0
         loss_weights[0, self.action_dim:self.observation_dim] = 0
-        return loss_weights
+
+        # manually set rtg weight
+        loss_weights[0, -(self.task_dim+1)] = rtg_weight  # assumes A S R RTG TASK #TODO TEST THIS... 
+        return loss_weights.to(device="cuda")
 
     #------------------------------------------ sampling ------------------------------------------#
 
@@ -452,22 +490,43 @@ class GaussianDiffusion_task_rtg(nn.Module):
         noise = torch.randn_like(x_start)
 
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
-        mode=1# (B,1) 0 o 1...
-        #mask= (B,H,T) same dims as x 
-        #x_noisy=x_noisy*mask+x_start*(1-mask)
-        x_noisy = apply_conditioning(x_start, cond, self.action_dim) # TODO ver conditioning... 
-        #loss_weights=mask*loss_weights... 
+
+        ### opcion 1 ###
+        mode_batch=self.bernoulli_dist.sample(sample_shape=(x_noisy.size(0), )).to(x_noisy.device).long() # (B,1) 0 o 1...
+        
+        mask=get_mask_from_batch(mode_batch,self.mask_dict) # (B,H,T) same dims as x 
+        
+        x_noisy=x_start*mask+x_noisy*(1-mask) # conditioning with mask... # TODO check this (works and the mask do what we want... )
+        noise=noise*(1-mask) # Check also this
+        ############
+
+        ### opcion 2 ### faster... duplicate the batch... 
+       #  mode=self.bernoulli_dist.sample(sample_shape=(x_noisy.size(0), 1)).to(x_noisy.device).float() # (B,1) 0 o 1...
+        
+      #  mask=get_mask_from_batch(mode_batch,mask_dict) (B,H,T) same dims as x 
+        
+    #    x_noisy=x_start*mask+x_noisy*(1-mask) # conditioning with mask... # TODO check this (works and the mask do what we want... )
+        #noise=noise*(1-mask) # Check also this
+        ############
+        
 #TODO APLICAR RANDOM CONDITIONING PARA LOS MODOS... 
 # TODO ver para pasar multiples task y que dataset tenga bien repartidos los task... en metaworld 
         #mode...
-        pred_epsilon = self.model(x_noisy,t,mode)
+        mode_batch=mode_batch.float().unsqueeze(-1)
+
+        mode_batch.requires_grad = True
+        t = torch.tensor(t, dtype=torch.float, requires_grad=True)
+        x_noisy.requires_grad= True
+        noise.requires_grad = True
+
+        pred_epsilon = self.model(x_noisy,t,mode_batch)
 
         assert noise.shape == pred_epsilon.shape
 
-        loss, info = self.loss_fn(pred_epsilon, noise,loss_weights) # use different losses deppending the mode... 
+        loss = self.loss_fn(pred_epsilon, noise)
 
-        return loss, info
-
+        return loss
+    
 
     def loss(self, x): 
     
