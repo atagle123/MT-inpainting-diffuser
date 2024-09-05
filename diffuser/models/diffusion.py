@@ -354,8 +354,8 @@ class GaussianDiffusion_task_rtg(nn.Module):
         ## get loss coefficients and initialize objective
         self.bernoulli_dist = torch.distributions.Bernoulli(p_mode)
 
-        loss_weights = self.get_loss_weights(action_weight,rtg_weight, loss_discount) # TODO 
-        self.loss_fn = Losses[loss_type](loss_weights)
+        self.loss_weights = self.get_loss_weights(action_weight,rtg_weight, loss_discount) # TODO 
+        self.loss_fn = Losses[loss_type]()
         self.mask_dict=get_mask_mode(horizon,self.transition_dim,task_dim)
 
     def get_loss_weights(self, action_weight, rtg_weight, discount):
@@ -382,11 +382,11 @@ class GaussianDiffusion_task_rtg(nn.Module):
         loss_weights[0, :self.action_dim] = action_weight
 
         # always conditioning on s0
-        loss_weights[0, self.action_dim:self.observation_dim] = 0
+        loss_weights[0, self.action_dim:self.action_dim+self.observation_dim] = 0
 
         # manually set rtg weight
-        loss_weights[0, -(self.task_dim+1)] = rtg_weight  # assumes A S R RTG TASK #TODO TEST THIS... 
-        return loss_weights.to(device="cuda")
+        loss_weights[0, -(self.task_dim+1)] = rtg_weight  # assumes A S R RTG TASK  
+        return loss_weights.to(device="cuda").unsqueeze(0) # (1,H,T) TODO fix
 
     #------------------------------------------ sampling ------------------------------------------#
 
@@ -493,11 +493,22 @@ class GaussianDiffusion_task_rtg(nn.Module):
 
         ### opcion 1 ###
         mode_batch=self.bernoulli_dist.sample(sample_shape=(x_noisy.size(0), )).to(x_noisy.device).long() # (B,1) 0 o 1...
-        
+        print("mode",mode_batch)
         mask=get_mask_from_batch(mode_batch,self.mask_dict) # (B,H,T) same dims as x 
-        
+       # print("mask0",mask[0,:,:])
+      #  print("mask1",mask[1,:,:])
+        assert mask.shape==x_noisy.shape # TODO sacar assert 
+
         x_noisy=x_start*mask+x_noisy*(1-mask) # conditioning with mask... # TODO check this (works and the mask do what we want... )
-        noise=noise*(1-mask) # Check also this
+       # print(x_start[0,:,:],"start0")
+      #  print(x_start[1,:,:],"start1")
+
+       # print("xnoisy0",x_noisy[0,:,:])
+      #  print("xnoisy1",x_noisy[1,:,:])
+        #noise=noise*(1-mask) # Check also this
+        loss_weights=self.loss_weights*(1-mask)
+        print("Noise to pred 0",loss_weights[0,:,:])
+        print("Noise to pred 1",loss_weights[1,:,:]) 
         ############
 
         ### opcion 2 ### faster... duplicate the batch... 
@@ -523,7 +534,7 @@ class GaussianDiffusion_task_rtg(nn.Module):
 
         assert noise.shape == pred_epsilon.shape
 
-        loss = self.loss_fn(pred_epsilon, noise)
+        loss = self.loss_fn(pred_epsilon, noise,loss_weights=loss_weights)
 
         return loss
     
