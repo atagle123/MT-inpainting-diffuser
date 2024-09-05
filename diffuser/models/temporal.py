@@ -429,7 +429,6 @@ class TemporalUnet_task_rtg_2(nn.Module): # continum task...
                     nn.Linear(dim * 4, dim),
                 )
 
-        #self.mask_dist = Bernoulli(probs=1-self.condition_dropout)
         embed_dim = 2*dim
 
         self.downs = nn.ModuleList([])
@@ -486,6 +485,7 @@ class TemporalUnet_task_rtg_2(nn.Module): # continum task...
         t = self.time_mlp(time)
 
         mode_embedd=self.mode_mlp(mode)
+        print(t.shape,mode_embedd.shape)
 
         t = torch.cat([t,mode_embedd], dim=-1) # test 
 

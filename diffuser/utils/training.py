@@ -65,10 +65,10 @@ class Trainer(object):
         self.gradient_accumulate_every = gradient_accumulate_every
 
         self.dataset = dataset
-        self.dataloader = cycle(torch.utils.data.DataLoader(
+        self.dataloader = iter(torch.utils.data.DataLoader(
             self.dataset, batch_size=train_batch_size, num_workers=0, shuffle=True, pin_memory=True
         ))
-        self.dataloader_vis = cycle(torch.utils.data.DataLoader(
+        self.dataloader_vis = iter(torch.utils.data.DataLoader(
             self.dataset, batch_size=1, num_workers=0, shuffle=True, pin_memory=True
         ))
         self.optimizer = torch.optim.Adam(diffusion_model.parameters(), lr=train_lr)
