@@ -1,6 +1,6 @@
 cosas que hacer:
 - debugear sequence dataset, ver calculate returns...  ✓
-- test get item and observationd desfase in observations
+- test get item and observationd desfase in observations ✓
 - test normalization
 
 diffusion:
@@ -11,5 +11,5 @@ diffusion:
 - test iter ✓
 - test mask ✓
 - test sampling that makes sense 
-- test where requires grad make sense... 
+- test where requires grad make sense... ✓
 - change noise mask por loss weights mask ✓

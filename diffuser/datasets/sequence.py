@@ -113,8 +113,6 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
         episodes_generator = self.minari_dataset.iterate_episodes()
         self.episodes={}
         ### generate new dataset in the format ###
-        # TODO agregar un truncador de observaciones si es que son una dim mas que las acciones... considerar tambien el caso del maze2d 
-        # TODO maybe change name of observation to observations... 
         for episode in episodes_generator:
             dict={}
             for key in view_keys:
@@ -331,6 +329,54 @@ class Maze2d_inpaint_dataset(InpaintSequenceDataset):
         self.normalize_dataset(normed_keys=self.normed_keys,normalizer=import_class(normalizer))
 
       #  self.sanity_test() # TODO 
+
+    def make_dataset(self,view_keys):
+        """
+        Transforms minari dataset to a standard way... 
+
+        Format: episodes_dict.keys-> ["observations","actions","rewards","terminations","truncations","total_returns"]
+                episodes_dict.values-> np.array 2d [H,Dim]
+        """ 
+        print("Making dataset... ")
+        episodes_generator = self.minari_dataset.iterate_episodes()
+        self.episodes={}
+        ### generate new dataset in the format ###
+        for episode in episodes_generator:
+            dict={}
+            for key in view_keys:
+                
+                attribute=find_key_in_data(episode,key)
+
+                if attribute is None:
+                    raise KeyError(f" Couldn't find a np.array value for the key {key}")
+
+                attribute_2d=atleast_2d(attribute)
+
+                ###
+                # specific truncation in maze2d dataset... 2 options truncate first element or change desired goal... 
+                ###
+                attribute_2d=attribute_2d[1:,:]
+
+                if self.use_padding:
+                    attribute=pad(attribute_2d,max_len=self.max_path_length)
+
+                    assert attribute.shape==(self.max_path_length,attribute_2d.shape[-1])
+
+                else:
+                    attribute=pad_min(attribute_2d,min_len=self.horizon)
+
+                
+                if key=="rewards":  
+                    if episode.terminations.any():
+                        episode_lenght=episode.total_timesteps
+                        attribute[episode_lenght-1]+=self.termination_penalty  # o quizas -1 tambien sirve...
+                        
+                
+                dict[key]=attribute
+
+            self.episodes[episode.id]=dict
+
+
 
     def __getitem__(self, idx):
         ep_id, start, end = self.indices[idx]
