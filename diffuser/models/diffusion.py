@@ -266,39 +266,6 @@ class GaussianDiffusion(nn.Module):
         raise NotImplementedError
 
 """
-def get_mask_mode(horizon,transition_dim,task_dim,device="cuda"): # assumes the following order: A S R RTG T
-    mask_dict={}
-
-    # Crear el tensor de índices para la dimensión T
-    indices = torch.arange(transition_dim).unsqueeze(0)  # Dimensiones (1, 1, T)
-
-    ### 0 mask ###
-
-    mask_0 = (indices >= transition_dim-task_dim).float()  # (1, 1, T) 
-
-    # Expandir la máscara a las dimensiones deseadas (B, H, T)
-    mask_0 = mask_0.expand(horizon, transition_dim)  # (B, H, T)
-    mask_0=mask_0.to(device)
-    mask_dict[0]=mask_0 # action inference
-
-    ### 1 mask ###
-
-    # Comparar los índices con el umbral y crear la máscara
-    mask_1 = (indices < transition_dim-task_dim).float()  # (1, 1, T) -1 because the rtg is not a condition... TODO ver aca despues para el sampling si condicionar o no en el rtg..., no siempre esta disponible..  
-
-    # Expandir la máscara a las dimensiones deseadas (B, H, T)
-    mask_1 = mask_1.expand(horizon, transition_dim)  # (B, H, T)
-    mask_1= mask_1.to(device)
-
-    mask_dict[1]=mask_1 # task inference
-
-    return(mask_dict)
-
-
-def get_mask_from_batch(mode_batch,mask_dict):
-    stacked_values = torch.stack([mask_dict[0], mask_dict[1]])
-    result_tensor = stacked_values[mode_batch]
-    return(result_tensor)
 
 
 class GaussianDiffusion_task_rtg(nn.Module):
@@ -356,7 +323,7 @@ class GaussianDiffusion_task_rtg(nn.Module):
 
         self.loss_weights = self.get_loss_weights(action_weight,rtg_weight, loss_discount) # TODO 
         self.loss_fn = Losses[loss_type]()
-        self.mask_dict=get_mask_mode(horizon,self.transition_dim,task_dim)
+        self.mask_dict=self.get_mask_mode()
 
     def get_loss_weights(self, action_weight, rtg_weight, discount):
         '''
@@ -387,6 +354,41 @@ class GaussianDiffusion_task_rtg(nn.Module):
         # manually set rtg weight
         loss_weights[0, -(self.task_dim+1)] = rtg_weight  # assumes A S R RTG TASK  
         return loss_weights.to(device="cuda").unsqueeze(0) # (1,H,T) TODO fix
+
+    def get_mask_mode(self,device="cuda"): # assumes the following order: A S R RTG T 
+        #TODO fix device 
+        mask_dict={}
+
+        # Crear el tensor de índices para la dimensión T
+        indices = torch.arange(self.transition_dim).unsqueeze(0)  # Dimensiones (1, T)
+
+        ### 0 mask ###
+
+        mask_0 = (indices >= self.transition_dim-self.task_dim).float()  # (1, T)
+
+        mask_0 = mask_0.expand(self.horizon, self.transition_dim).clone()  # (H, T)
+
+        mask_0[0,self.action_dim:self.action_dim+self.observation_dim]= 1 # condition on s0
+        mask_0=mask_0.to(device)
+        mask_dict[0]=mask_0 # action inference 
+
+        ### 1 mask ###
+
+        # Comparar los índices con el umbral y crear la máscara
+        mask_1 = (indices < self.transition_dim-self.task_dim).float()  # (1, T) -1 because the rtg is not a condition... TODO ver aca despues para el sampling si condicionar o no en el rtg..., no siempre esta disponible..  
+
+        # Expandir la máscara a las dimensiones deseadas (H, T)
+        mask_1 = mask_1.expand(self.horizon, self.transition_dim)  # (H, T)
+        mask_1= mask_1.to(device)
+
+        mask_dict[1]=mask_1 # task inference
+
+        return(mask_dict)
+    
+    def get_mask_from_batch(self,mode_batch):
+        stacked_values = torch.stack([self.mask_dict[0], self.mask_dict[1]])
+        result_tensor = stacked_values[mode_batch]
+        return(result_tensor)
 
     #------------------------------------------ sampling ------------------------------------------#
 
@@ -493,8 +495,8 @@ class GaussianDiffusion_task_rtg(nn.Module):
 
         ### opcion 1 ###
         mode_batch=self.bernoulli_dist.sample(sample_shape=(x_noisy.size(0), )).to(x_noisy.device).long() # (B,1) 0 o 1...
-        print("mode",mode_batch)
-        mask=get_mask_from_batch(mode_batch,self.mask_dict) # (B,H,T) same dims as x 
+       # print("mode",mode_batch)
+        mask=self.get_mask_from_batch(mode_batch) # (B,H,T) same dims as x 
        # print("mask0",mask[0,:,:])
       #  print("mask1",mask[1,:,:])
         assert mask.shape==x_noisy.shape # TODO sacar assert 
@@ -507,8 +509,8 @@ class GaussianDiffusion_task_rtg(nn.Module):
       #  print("xnoisy1",x_noisy[1,:,:])
         #noise=noise*(1-mask) # Check also this
         loss_weights=self.loss_weights*(1-mask)
-        print("Noise to pred 0",loss_weights[0,:,:])
-        print("Noise to pred 1",loss_weights[1,:,:]) 
+     #   print("Noise to pred 0",loss_weights[0,:,:])
+    #    print("Noise to pred 1",loss_weights[1,:,:])
         ############
 
         ### opcion 2 ### faster... duplicate the batch... 
@@ -536,7 +538,7 @@ class GaussianDiffusion_task_rtg(nn.Module):
 
         loss = self.loss_fn(pred_epsilon, noise,loss_weights=loss_weights)
 
-        return loss
+        return loss, {}
     
 
     def loss(self, x): 
