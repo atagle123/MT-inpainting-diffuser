@@ -1,7 +1,7 @@
 cosas que hacer:
 - debugear sequence dataset, ver calculate returns...  ✓
 - test get item and observationd desfase in observations ✓
-- test normalization
+- test normalization ✓
 
 diffusion:
 - test temporal u net... ✓
@@ -13,3 +13,15 @@ diffusion:
 - test sampling that makes sense 
 - test where requires grad make sense... ✓
 - change noise mask por loss weights mask ✓
+
+- view params... 
+training 
+- test training...
+
+
+
+TODO:
+- ver loss weights 
+- confirmar conditioning en state
+- ver error cycle
+agregar atributo task dim a dataset... 

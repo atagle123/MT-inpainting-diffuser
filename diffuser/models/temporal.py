@@ -485,7 +485,7 @@ class TemporalUnet_task_rtg_2(nn.Module): # continum task...
         t = self.time_mlp(time)
 
         mode_embedd=self.mode_mlp(mode)
-        print(t.shape,mode_embedd.shape)
+        #print(t.shape,mode_embedd.shape)
 
         t = torch.cat([t,mode_embedd], dim=-1) # test 
 
