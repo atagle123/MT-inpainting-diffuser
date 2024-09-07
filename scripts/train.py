@@ -13,9 +13,9 @@ import wandb
 #----------------------------------- setup -----------------------------------#
 #-----------------------------------------------------------------------------#
 
-dataset=""
+dataset="maze2d"
 
-args=load_experiment_params(f"logs/configs/{dataset}/{dataset}-medium-expert-v2/configs_diffusion.txt")
+args=load_experiment_params(f"logs/configs/{dataset}/configs_diffusion.txt")
 
 set_seed(args["seed"])
 
@@ -25,7 +25,7 @@ print(f"DEVICE: {device}")
 ## serialization
 current_dir=os.getcwd()
 
-exp_name=f"H{args["horizon"]}_T{args["n_diffusion_steps"]}"
+exp_name="123"#f"H{args["horizon"]}_T{args["n_diffusion_steps"]}"
 savepath=os.path.join(current_dir,args["logbase"], args["dataset_name"],"diffusion", exp_name)
 os.makedirs(savepath, exist_ok=True)
 
@@ -33,19 +33,28 @@ os.makedirs(savepath, exist_ok=True)
 #---------------------------------- dataset ----------------------------------#
 #-----------------------------------------------------------------------------#
 
+
 dataset_config = Config(
     args["dataset"],
     savepath=(savepath, 'dataset_config.pkl'),
-    env_name=args["dataset_name"],
+    dataset_name=args["dataset_name"],
     horizon=args["horizon"],
     normalizer=args["normalizer"],
-    preprocess_fns=args["preprocess_fns"],
-    max_path_length=args["max_path_length"]
-)
+    max_path_length=args["max_path_length"],
+    max_n_episodes=args["max_n_episodes"],
+    termination_penalty=args["termination_penalty"],
+    seed=args["seed"],
+    use_padding=args["use_padding"],
+    view_keys=args["view_keys"],
+    normed_keys=args["normed_keys"],
+    discount=args["discount"])
+
 dataset = dataset_config()
 
 observation_dim = dataset.observation_dim
 action_dim = dataset.action_dim
+task_dim=2
+
 
 
 #-----------------------------------------------------------------------------#
@@ -60,11 +69,13 @@ model_config = Config(
     savepath=(savepath, 'model_config.pkl'),
     device=device,
     horizon=args["horizon"],
-    transition_dim=observation_dim + action_dim,
-    cond_dim=observation_dim,
+    transition_dim=observation_dim+action_dim+2+task_dim, # S+A+R+RTG+TASK
+    dim=args["dim"],
     dim_mults=args["dim_mults"],
     attention=args["attention"],
-)
+    calc_energy=args["calc_energy"]
+    )
+
 
 diffusion_config = Config(
     args["diffusion_model"],
@@ -72,16 +83,17 @@ diffusion_config = Config(
     horizon=args["horizon"],
     observation_dim=observation_dim,
     action_dim=action_dim,
-    n_timesteps=args["n_diffusion_steps"],
+    task_dim=task_dim,
+    n_timesteps=args["n_timesteps"],
     loss_type=args["loss_type"],
     clip_denoised=args["clip_denoised"],
-    predict_epsilon=args["predict_epsilon"],
-    ## loss weighting
     action_weight=args["action_weight"],
-    loss_weights=args["loss_weights"],
+    rtg_weight=args["rtg_weight"],
     loss_discount=args["loss_discount"],
+    p_mode=args["p_mode"],                    
     device=device,
 )
+
 
 model = model_config()
 diffusion = diffusion_config(model)
@@ -121,7 +133,7 @@ print('✓')
 #-----------------------------------------------------------------------------#
 
 n_epochs = int(args["n_train_steps"] // args["n_steps_per_epoch"])
-wandb_name=f"{args["dataset_name"]}_diffusion_H{args["horizon"]}_T{args["n_diffusion_steps"]}"
+wandb_name="123"#f"{args["dataset_name"]}_diffusion_H{args["horizon"]}_T{args["n_diffusion_steps"]}"
 
 if args["wandb_log"]:
     wandb.init(
