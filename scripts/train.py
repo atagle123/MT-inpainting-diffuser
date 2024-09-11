@@ -114,6 +114,7 @@ trainer_config = Config(
 )
 
 trainer = trainer_config(diffusion, dataset)
+#trainer.load(epoch=20000)
 
 #-----------------------------------------------------------------------------#
 #------------------------ test forward & backward pass -----------------------#

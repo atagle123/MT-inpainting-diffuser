@@ -157,6 +157,15 @@ class InpaintSequenceDataset(torch.utils.data.Dataset):
 
             self.episodes[ep_id]=dict # TODO check this... 
 
+    def get_norm_keys_dim(self):
+        self.keys_dim_dict={}
+        dict=self.episode[0]
+        for key,attribute in dict.items():
+            raise NotImplementedError
+
+
+
+
     def make_indices(self, horizon):
         '''
             makes indices for sampling from dataset;
@@ -395,18 +404,3 @@ class Maze2d_inpaint_dataset(InpaintSequenceDataset):
         return batch
 
 
-
-"""    def __getitem__(self, idx):
-        ep_id, start, end = self.indices[idx]
-        episode=self.episodes[ep_id]
-        batch_list=[]
-
-        for key in self.view_keys:
-            batch_list.append(episode[key][start:end])
-
-
-        trajectories = np.concatenate(batch_list, axis=-1)
-
-        batch = Batch(trajectories)
-
-        return batch"""

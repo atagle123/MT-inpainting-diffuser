@@ -30,10 +30,6 @@ def default_sample_fn(model, x, cond, t):
     return model_mean + model_std * noise, values
 
 
-def make_timesteps(batch_size, i, device):
-    t = torch.full((batch_size,), i, device=device, dtype=torch.long)
-    return t
-
 
 class GaussianDiffusion(nn.Module):
     def __init__(self, model, horizon, observation_dim, action_dim, n_timesteps=1000,
@@ -413,9 +409,13 @@ class GaussianDiffusion_task_rtg(nn.Module):
     
 
 
-    def p_mean_variance(self,x,t):
+    def p_mean_variance(self,x,t,mode_batch):
+        if self.rtg_guidance: #TODO
 
-        epsilon = self.model(x=x, t=t)
+            pass
+
+        else:
+            epsilon = self.model(x=x, t=t,mode=mode_batch)
 
         t = t.detach().to(torch.int64)
         x_recon = self.predict_start_from_noise(x, t=t, noise=epsilon)
@@ -432,32 +432,38 @@ class GaussianDiffusion_task_rtg(nn.Module):
 
     
     @torch.no_grad()
-    def p_sample(self, x, t): # Falta REpaint sampling TODO
+    def p_sample(self, x, t,mode):
         b, *_, device = *x.shape, x.device
-        model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=t)
+        model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=t,mode_batch=mode)
         noise = 0.5*torch.randn_like(x)
         # no noise when t == 0
         nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
         return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
 
     @torch.no_grad()
-    def p_sample_loop(self, shape, verbose=True, return_chain=False):
+    def p_sample_loop(self, shape,traj_known, mode, verbose=True, return_chain=False):
         """ Classical DDPM (check this) sampling algorithm 
         
         """
         device = self.betas.device
 
         batch_size = shape[0]
+        mask=self.get_mask_from_batch(mode) # (B,H,T) same dims as x 
+        # assume mode is in a batch of the way (B,1) 
+    
         x = torch.randn(shape, device=device) # TODO:  en dd usan 0.5*torch.randn(shape, device=device) y no en mtdiff
-
-        chain = [x] if return_chain else None  # TODO: condicionar a s0 si o no? 
+        x=traj_known*mask+x*(1-mask) # TODO check this...
+        chain = [x] if return_chain else None  
         progress = utils.Progress(self.n_timesteps) if verbose else utils.Silent()
-        for i in reversed(range(0, self.n_timesteps)): # TODO repaint sampling ... 
-            t = make_timesteps(batch_size, i, device)
-            x = self.p_sample(self, x, t)
+
+        for i in reversed(range(0, self.n_timesteps)): 
+            t = torch.full((batch_size,), i, device=device, dtype=torch.long)
+            x = self.p_sample(self, x, t,mode)
+            x=traj_known*mask+x*(1-mask)
 
             progress.update({'t': i})
             if return_chain: chain.append(x)
+
 
         progress.stamp() # en otros usar .close()
 
@@ -465,15 +471,15 @@ class GaussianDiffusion_task_rtg(nn.Module):
         return Sample(x,  chain)
 
     @torch.no_grad()
-    def conditional_sample(self, horizon=None,batch_size=32, **sample_kwargs):
+    def conditional_sample(self,traj_known, mode,  horizon=None,batch_size=32, **sample_kwargs):
         '''
             conditions : [ (time, state), ... ]
         '''
-        device = self.betas.device
+        #device = self.betas.device
         horizon = horizon or self.horizon
         shape = (batch_size, horizon, self.transition_dim)
 
-        return self.p_sample_loop(shape, **sample_kwargs)
+        return self.p_sample_loop(shape,traj_known, mode, **sample_kwargs)
 
     #------------------------------------------ training ------------------------------------------#
 
@@ -550,8 +556,8 @@ class GaussianDiffusion_task_rtg(nn.Module):
 
 
 
-    def forward(self,traj_known,mask, *args, **kwargs):
-        return self.conditional_sample(traj_known,mask, *args, **kwargs) # TODO: repaint sampling... faltan hiperparametros del sampling... 
+    def forward(self,traj_known,mode, *args, **kwargs):
+        return self.conditional_sample(traj_known, mode, *args, **kwargs) # TODO: repaint sampling... faltan hiperparametros del sampling... 
     
 
 

@@ -40,12 +40,7 @@ def sort_by_values(actions, observations, rewards, no_inpaint_step,gamma): # ref
     """
     [B,past_H+future_H,(A+S+R)]
     """
-    rewards_to_go=rewards[:,:no_inpaint_step,:]  # notar que aca no son values (B,future_H,1)
-
-    values=compute_reward_to_go_batch(rewards_to_go,gamma) # (B,H,1)-> (B)
-
-    # multiplicar por gamma 
-    # sumar
+    values=compute_reward_to_go_batch(rewards,gamma) # (B,H,1)-> (B)
 
     inds = torch.argsort(values, descending=True)
 
@@ -65,43 +60,61 @@ class Policy:
         self.dataset = dataset # dataset is a instance of the class sequence dataset
         self.action_dim = diffusion_model.action_dim
         self.observation_dim = diffusion_model.observation_dim
+        self.task_dim=diffusion_model.task_dim
         self.preprocess_fn = get_policy_preprocess_fn(preprocess_fns)
         self.gamma=gamma
         self.sample_kwargs = sample_kwargs
 
-    def __call__(self, conditions, batch_size=1, verbose=True):
+    def __call__(self, conditions, mode, verbose=True):
         """
+        Function to to get the data from a dict of args
+
+        Args:
+            conditions (torch.tensor): (B,H,T) a tensor filled with the known info and with 0 in everywhere else.
+            mode (torch.tensor): (B,1) a tensor with the mode for each batch.
+            verbose (bool): Print data
+
+        Returns:
+            df: dataframe with the data
         falta revisar que no inpaint step funcione, el sort tambien y la unnormalizacion tambien. evaluar todo aca.
         """
+        normed_rewards_condition = conditions[:, :, self.action_dim+self.observation_dim:self.action_dim+self.observation_dim+1]
+        conditions[:, :, self.action_dim+self.observation_dim:self.action_dim+self.observation_dim+1] = self.dataset.normalizer.normalize_torch(normed_rewards_condition, 'rewards') # normalizar solo acciones y observaciones ... aunque tambien se podrian normalizar las rewards... probar esto... 
         
-        ## falta
-        conditions = {k: self.preprocess_fn(v) for k, v in conditions.items()}
-        conditions = self._format_conditions(conditions, batch_size)   # conditions ahora es todo lo que ya ocurrio... 
+        ## extract action [ batch_size x horizon x transition_dim + 1 ] transition_dim=actions+observations+rewards / + goal
+        normed_actions_condition = conditions[:, :, :self.action_dim]
+        conditions[:, :, :self.action_dim] = self.dataset.normalizer.normalize_torch(normed_actions_condition, 'actions') # normalizar solo acciones y observaciones ... aunque tambien se podrian normalizar las rewards... probar esto... 
 
-        no_inpaint_step=conditions.shape #ver esto.
-        #falta
+        normed_observations_condition = conditions[:, :, self.action_dim:self.action_dim+self.observation_dim]
+        conditions[:, :, self.action_dim:self.action_dim+self.observation_dim] = self.dataset.normalizer.normalize_torch(normed_observations_condition, 'observations')
 
+        normed_task_condition = conditions[:, :, -self.task_dim:] # TODO check... 
+        conditions[:, :, -self.task_dim:] = self.dataset.normalizer.normalize_torch(normed_task_condition, 'desired_goal')
         
+
         ## run reverse diffusion process
-        trajectories = self.diffusion_model(conditions, verbose=verbose, **self.sample_kwargs) # inpainting... agregar algo para sample by inpainting
+        trajectories = self.diffusion_model(conditions, mode, verbose=verbose, **self.sample_kwargs) # 
 
-        normed_rewards = trajectories[:, :, -1]
+        normed_rewards = trajectories[:, :, self.action_dim+self.observation_dim:self.action_dim+self.observation_dim+1]
         rewards = self.dataset.normalizer.unnormalize_torch(normed_rewards, 'rewards') # normalizar solo acciones y observaciones ... aunque tambien se podrian normalizar las rewards... probar esto... 
         
         ## extract action [ batch_size x horizon x transition_dim + 1 ] transition_dim=actions+observations+rewards / + goal
         normed_actions = trajectories[:, :, :self.action_dim]
         actions = self.dataset.normalizer.unnormalize_torch(normed_actions, 'actions') # normalizar solo acciones y observaciones ... aunque tambien se podrian normalizar las rewards... probar esto... 
 
-        normed_observations = trajectories[:, :, self.action_dim:self.observation_dim] 
+        normed_observations = trajectories[:, :, self.action_dim:self.action_dim+self.observation_dim]
         observations = self.dataset.normalizer.unnormalize_torch(normed_observations, 'observations')
 
-        #IMPIORTANTE: CORTAR ACA POR no inpaint step ...
-        actions_sorted, observations_sorted, rewards_sorted, values = sort_by_values(actions, observations, rewards, no_inpaint_step, gamma=self.gamma) #sort by sampled returns. quizas esta no es la mejor metrica? puede ser que sea inconsistente? 
+        normed_task = trajectories[:, :, -self.task_dim:] # TODO check... maybe do one function per sampling mode... 
+        task = self.dataset.normalizer.normalize_torch(normed_task, 'desired_goal')
 
+        #TODO ver donde pponer el task sorted.. 
+        actions_sorted, observations_sorted, rewards_sorted, values = sort_by_values(actions, observations, rewards, gamma=self.gamma) #sort by sampled returns. quizas esta no es la mejor metrica? puede ser que sea inconsistente? 
+        # TODO ver que es mejor, si ordenar el rtg o los rewards... 
         ## extract first action
         action = actions_sorted[0, 0]
 
-        trajectories = Trajectories(actions_sorted, observations_sorted, rewards_sorted) # generalizar aca ...
+        trajectories = Trajectories(actions_sorted, observations_sorted, rewards_sorted,task) # generalizar aca ...
 
         return action, trajectories, values
 
@@ -109,18 +122,10 @@ class Policy:
     def device(self):
         parameters = list(self.diffusion_model.parameters())
         return parameters[0].device
+    
+    def norm_evertything(self,):
+        pass
 
-    def _format_conditions(self, conditions, batch_size):
-        """Function that returns a dict with the corresponding tensor"""
-        conditions = utils.apply_dict(
-            self.dataset.normalizer.normalize,
-            conditions,
-            'observations',
-        )
-        conditions = utils.to_torch(conditions, dtype=torch.float32, device='cuda:0')
-        conditions = utils.apply_dict(
-            einops.repeat,
-            conditions,
-            'd -> repeat d', repeat=batch_size,
-        )
-        return conditions
+    def unorm_everything(self,):
+        pass
+

@@ -101,7 +101,7 @@ class Trainer(object):
 
             for i in range(self.gradient_accumulate_every):
                 batch = next(self.dataloader)
-                batch = batch_to_device(batch)  # batch to device # check this... 
+                batch = batch_to_device(batch)  # batch to device # check this... # TODO maybe it can perform quicly 
 
                 loss, infos = self.model.loss(*batch)
                 loss = loss / self.gradient_accumulate_every
@@ -178,6 +178,8 @@ class Trainer(object):
             renders samples from (ema) diffusion model
         '''
         env = self.dataset.minari_dataset.recover_environment(render_mode="human")
+
+
         for i in range(batch_size):
 
             ## get a single datapoint
