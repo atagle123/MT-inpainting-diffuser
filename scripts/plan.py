@@ -18,8 +18,7 @@ dataset="maze2d"
 
 args=load_experiment_params(f"logs/configs/{dataset}/configs_diffusion.txt")
 
-set_seed(int(datetime.now().timestamp()) # TODO maybe change this... 
-)
+set_seed(args["seed"]) # TODO maybe change this... 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -63,8 +62,6 @@ logger_config = utils.Config(
 
 logger = logger_config()
 
-## policies are wrappers around an unconditional diffusion model and a value guide
-
 policy_config = utils.Config(
     Policy,
     diffusion_model=diffusion,
@@ -73,7 +70,6 @@ policy_config = utils.Config(
     ## sampling kwargs
     batch_size_sample=args["batch_size_sample"],
     horizon_sample = args["horizon_sample"],
-#    n_diffusion_steps_sample = args["n_diffusion_steps_sample"],
     return_chain=args["return_chain"]
 )
 
@@ -122,8 +118,6 @@ for i in range(500):
 # Compute the mean of the losses
 mean_loss = sum(losses) / len(losses)
 
-print("Losses per iteration:")
-print(losses)
 print("\nMean Loss:")
 print(mean_loss)
   #  print(traj[:,:,:-2],"pred")

@@ -58,7 +58,6 @@ class Policy:
         self.task_dim=diffusion_model.task_dim
         self.gamma=gamma
         self.sample_kwargs = sample_kwargs
-        print(self.sample_kwargs)
 
     def __call__(self, conditions, mode):
         """
