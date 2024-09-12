@@ -72,7 +72,8 @@ model_config = Config(
     dim=args["dim"],
     dim_mults=args["dim_mults"],
     attention=args["attention"],
-    calc_energy=args["calc_energy"]
+    calc_energy=args["calc_energy"],
+    task_dim=task_dim
     )
 
 

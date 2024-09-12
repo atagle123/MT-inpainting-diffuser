@@ -19,19 +19,12 @@ exp_name="rtg_sampling"
 
 args=load_experiment_params(f"logs/configs/{dataset}/{exp_name}/configs_diffusion.txt")
 
-set_seed(args["seed"]) # TODO maybe change this... 
+set_seed(args["seed"])
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-## diffusion model
-horizon= args["horizon"]
-n_diffusion_steps= args["n_diffusion_steps_sample"]
-
-
 ## loading
 current_dir=os.getcwd()
-
-#ponerle nombre al experimento
 
 diffusion_loadpath=os.path.join(current_dir,args["logbase"], args["dataset_name"],"diffusion", exp_name)
 

@@ -120,9 +120,13 @@ class Policy:
         parameters = list(self.diffusion_model.parameters())
         return parameters[0].device
     
-    def norm_evertything(self,):
+    def norm_evertything(self,conditions,keys_order):
+        self.dataset.keys_dim_dict
+        self.dataset.normalizer.normalize_torch(normed_actions_condition, 'actions')
+
         pass
 
     def unorm_everything(self,):
         pass
 
+# idea: policy tiene metodos basicos y el metodo call depende del caso, por ejemplo en el exp rtg se llama a task inference con la historia ya conocida y tambien se llama a la eleccion de acciones... 

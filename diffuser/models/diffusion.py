@@ -370,3 +370,168 @@ class GaussianDiffusion_task_rtg(GaussianDiffusion):
     #    x_noisy=x_start*mask+x_noisy*(1-mask) # conditioning with mask... # TODO check this (works and the mask do what we want... )
         #noise=noise*(1-mask) # Check also this
         ############
+
+
+class GaussianDiffusion_repaint(GaussianDiffusion):
+    """
+    DDPM algorithm with repaint sampling
+    """
+    def __init__(self, model, horizon, observation_dim, action_dim,task_dim, n_timesteps=20,
+        loss_type='l2', clip_denoised=True,
+        action_weight=1.0,rtg_weight=1.0, loss_discount=1.0):
+        super().__init__(n_timesteps=n_timesteps,clip_denoised=clip_denoised)
+        self.horizon = horizon
+        self.observation_dim = observation_dim
+        self.action_dim = action_dim
+        self.task_dim=task_dim
+        self.transition_dim = observation_dim + action_dim+1+task_dim+1 # (S+A+R+G+rtg)
+        self.model = model
+        self.action_weight=action_weight
+        self.rtg_weight=rtg_weight
+        self.loss_discount=loss_discount
+
+        ## get loss coefficients and initialize objective
+
+        self.loss_weights = self.get_loss_weights(action_weight,rtg_weight, loss_discount) # TODO 
+        self.loss_fn = Losses[loss_type]()
+
+    def get_loss_weights(self, action_weight, rtg_weight, discount):
+        '''
+            sets loss coefficients for trajectory
+
+            action_weight   : float
+                coefficient on first action loss
+            discount   : float
+                multiplies t^th timestep of trajectory loss by discount**t
+
+        '''
+        self.action_weight = action_weight
+
+        dim_weights = torch.ones(self.transition_dim, dtype=torch.float32)
+
+        ## decay loss with trajectory timestep: discount**t
+        discounts = discount ** torch.arange(self.horizon, dtype=torch.float)
+        discounts = discounts / discounts.mean()
+        loss_weights = torch.einsum('h,t->ht', discounts, dim_weights)
+
+        ## manually set a0 weight
+        loss_weights[0, :self.action_dim] = action_weight
+
+        # always conditioning on s0
+        loss_weights[0, self.action_dim:self.action_dim+self.observation_dim] = 0
+
+        # manually set rtg weight
+        loss_weights[0, -(self.task_dim+1)] = rtg_weight  # assumes A S R RTG TASK  
+        return loss_weights.to(device="cuda").unsqueeze(0) # (1,H,T) TODO fix
+
+    #------------------------------------------ sampling ------------------------------------------#
+
+
+    @torch.enable_grad()
+    def p_mean_variance(self,x,t,mode_batch):
+      #  if self.rtg_guidance: #TODO
+
+       #     pass
+
+        #else:
+        x=x.clone().detach().requires_grad_(True)
+        t=t.clone().float().detach().requires_grad_(True)
+        mode_batch=mode_batch.clone().detach().requires_grad_(True)
+
+        epsilon = self.model(x=x, time=t,mode=mode_batch)
+
+        t = t.detach().to(torch.int64)
+        x_recon = self.predict_start_from_noise(x, t=t, noise=epsilon)
+
+        if self.clip_denoised:
+            x_recon.clamp_(-1., 1.)
+        else:
+            assert RuntimeError()
+
+        model_mean, posterior_variance, posterior_log_variance = self.q_posterior(
+                x_start=x_recon, x_t=x, t=t)
+        return model_mean, posterior_variance, posterior_log_variance
+
+
+    
+    @torch.no_grad()
+    def p_sample(self, x, t,mode):
+        b, *_, device = *x.shape, x.device
+        model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=t,mode_batch=mode)
+        noise = 0.5*torch.randn_like(x)
+        # no noise when t == 0
+        nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
+        return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
+
+    @torch.no_grad()
+    def p_sample_loop(self, shape,traj_known, mode, verbose=False, return_chain=False):
+        """ Classical DDPM (check this) sampling algorithm 
+        
+        """
+        device = self.betas.device
+
+        batch_size = shape[0]
+        mask=self.get_mask_from_batch(mode) # (B,H,T) same dims as x 
+        mode=mode.repeat(batch_size,1).float() # B,1
+
+        x = torch.randn(shape, device=device) # TODO:  en dd usan 0.5*torch.randn(shape, device=device) y no en mtdiff
+        x=traj_known*mask+x*(1-mask) 
+        
+        chain = [x] if return_chain else None  
+        progress = utils.Progress(self.n_timesteps) if verbose else utils.Silent()
+
+        for i in reversed(range(0, self.n_timesteps)): 
+            t = torch.full((batch_size,), i, device=device, dtype=torch.long)
+            x = self.p_sample(x, t,mode)
+            x=traj_known*mask+x*(1-mask)
+
+            progress.update({'t': i})
+            if return_chain: chain.append(x)
+
+
+        progress.stamp() # en otros usar .close()
+
+        if return_chain: chain = torch.stack(chain, dim=1)
+        return Sample(x,  chain)
+
+    @torch.no_grad()
+    def conditional_sample(self,traj_known, mode,  horizon_sample=None,batch_size_sample=32, **sample_kwargs):
+        '''
+            conditions : [ (time, state), ... ]
+        '''
+        horizon = horizon_sample or self.horizon
+        shape = (batch_size_sample, horizon, self.transition_dim)
+
+        return self.p_sample_loop(shape,traj_known, mode, **sample_kwargs)
+    
+
+    def forward(self,traj_known,mode, *args, **kwargs):
+        return self.conditional_sample(traj_known, mode, *args, **kwargs)
+
+    #------------------------------------------ training ------------------------------------------#
+
+    def p_losses(self, x_start, t):
+
+        noise = torch.randn_like(x_start)
+        x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
+ 
+        t = torch.tensor(t, dtype=torch.float, requires_grad=True)
+
+        x_noisy.requires_grad= True
+        noise.requires_grad = True
+
+        pred_epsilon = self.model(x_noisy,t)
+
+        assert noise.shape == pred_epsilon.shape
+
+        loss = self.loss_fn(pred_epsilon, noise,loss_weights=self.loss_weights) # Maybe do two functions to do that... 
+
+        return loss, {}
+    
+
+    def loss(self, x): 
+    
+        batch_size = len(x)
+        t = torch.randint(0, self.n_timesteps, (batch_size,), device=x.device).long()
+
+        return self.p_losses(x, t)
