@@ -12,23 +12,7 @@ from .helpers import (
 )
 
 
-Sample = namedtuple('Sample', 'trajectories values chains')
-
-
-@torch.no_grad()
-def default_sample_fn(model, x, cond, t):
-    model_mean, _, model_log_variance = model.p_mean_variance(x=x, cond=cond, t=t)
-    model_std = torch.exp(0.5 * model_log_variance)
-
-    # no noise when t == 0
-    noise = torch.randn_like(x)
-    noise[t == 0] = 0 #TODO : aca hacen algo diferente con non zero mask... 
-    # nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
-    # return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
-
-    values = torch.zeros(len(x), device=x.device)
-    return model_mean + model_std * noise, values
-
+Sample = namedtuple('Sample', 'trajectories chains')
 
 
 class GaussianDiffusion(nn.Module):
@@ -81,7 +65,6 @@ class GaussianDiffusion(nn.Module):
 
         self.bernoulli_dist = torch.distributions.Bernoulli(p_mask)
 
-
     #------------------------------------------ sampling ------------------------------------------#
 
     def predict_start_from_noise(self, x_t, t, noise):
@@ -101,8 +84,6 @@ class GaussianDiffusion(nn.Module):
         posterior_variance = extract(self.posterior_variance, t, x_t.shape)
         posterior_log_variance_clipped = extract(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
-
-    
 
 
     def p_mean_variance(self,x, past_K_history, K_step, t, returns=None):
@@ -139,7 +120,7 @@ class GaussianDiffusion(nn.Module):
         return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
 
     @torch.no_grad()
-    def p_sample_loop(self, shape, past_K_history, verbose=True, return_chain=False, sample_fn=default_sample_fn, **sample_kwargs):
+    def p_sample_loop(self, shape, past_K_history, verbose=True, return_chain=False, **sample_kwargs):
         """ Classical DDPM (check this) sampling algorithm with sample_fn incorporated and conditioning
         
         """
@@ -153,7 +134,7 @@ class GaussianDiffusion(nn.Module):
         K_step=past_K_history.shape[1] # ver esto... TODO
         progress = utils.Progress(self.n_timesteps) if verbose else utils.Silent()
         for i in reversed(range(0, self.n_timesteps)):
-            t = make_timesteps(batch_size, i, device)
+            t = torch.full((batch_size,), i, device=device, dtype=torch.long)
             x = self.p_sample(self, x, past_K_history,K_step, t, **sample_kwargs) # sample with conditions
         #    x = apply_conditioning(x, cond, self.action_dim) # apply conditioning again # TODO: cambiar aca por el mask y todo y usar repaint sampling... 
 
@@ -255,15 +236,6 @@ class GaussianDiffusion(nn.Module):
 
 
 
-
-"""
-    def get_random_mask(self):
-        #TODO samplear de una uniforme y mitad mitad... o quizas menos...
-        raise NotImplementedError
-
-"""
-
-
 class GaussianDiffusion_task_rtg(nn.Module):
     """
     DDPM algorithm with 2 modes, task inference (unmasked plan) or policy sampling (masked plan and unmasked task) 
@@ -335,7 +307,6 @@ class GaussianDiffusion_task_rtg(nn.Module):
 
         dim_weights = torch.ones(self.transition_dim, dtype=torch.float32)
 
-
         ## decay loss with trajectory timestep: discount**t
         discounts = discount ** torch.arange(self.horizon, dtype=torch.float)
         discounts = discounts / discounts.mean()
@@ -396,6 +367,7 @@ class GaussianDiffusion_task_rtg(nn.Module):
             extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t -
             extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape) * noise
         )
+    
 
     def q_posterior(self, x_start, x_t, t):
         posterior_mean = (
@@ -406,16 +378,18 @@ class GaussianDiffusion_task_rtg(nn.Module):
         posterior_log_variance_clipped = extract(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-    
-
-
+    @torch.enable_grad()
     def p_mean_variance(self,x,t,mode_batch):
-        if self.rtg_guidance: #TODO
+      #  if self.rtg_guidance: #TODO
 
-            pass
+       #     pass
 
-        else:
-            epsilon = self.model(x=x, t=t,mode=mode_batch)
+        #else:
+        x = torch.tensor(x, requires_grad=True)
+        t = torch.tensor(t, dtype=torch.float, requires_grad=True)
+        mode_batch = torch.tensor(mode_batch, requires_grad=True)
+
+        epsilon = self.model(x=x, time=t,mode=mode_batch)
 
         t = t.detach().to(torch.int64)
         x_recon = self.predict_start_from_noise(x, t=t, noise=epsilon)
@@ -449,16 +423,19 @@ class GaussianDiffusion_task_rtg(nn.Module):
 
         batch_size = shape[0]
         mask=self.get_mask_from_batch(mode) # (B,H,T) same dims as x 
+        mode=mode.repeat(batch_size,1).float()
+
         # assume mode is in a batch of the way (B,1) 
-    
+        #mask=mask.repeat(batch_size,1,1)
         x = torch.randn(shape, device=device) # TODO:  en dd usan 0.5*torch.randn(shape, device=device) y no en mtdiff
         x=traj_known*mask+x*(1-mask) # TODO check this...
+        
         chain = [x] if return_chain else None  
         progress = utils.Progress(self.n_timesteps) if verbose else utils.Silent()
 
         for i in reversed(range(0, self.n_timesteps)): 
             t = torch.full((batch_size,), i, device=device, dtype=torch.long)
-            x = self.p_sample(self, x, t,mode)
+            x = self.p_sample(x, t,mode)
             x=traj_known*mask+x*(1-mask)
 
             progress.update({'t': i})
@@ -471,13 +448,13 @@ class GaussianDiffusion_task_rtg(nn.Module):
         return Sample(x,  chain)
 
     @torch.no_grad()
-    def conditional_sample(self,traj_known, mode,  horizon=None,batch_size=32, **sample_kwargs):
+    def conditional_sample(self,traj_known, mode,  horizon_sample=None,batch_size_sample=32, **sample_kwargs):
         '''
             conditions : [ (time, state), ... ]
         '''
         #device = self.betas.device
-        horizon = horizon or self.horizon
-        shape = (batch_size, horizon, self.transition_dim)
+        horizon = horizon_sample or self.horizon
+        shape = (batch_size_sample, horizon, self.transition_dim)
 
         return self.p_sample_loop(shape,traj_known, mode, **sample_kwargs)
 
