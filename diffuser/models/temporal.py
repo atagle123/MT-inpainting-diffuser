@@ -473,7 +473,8 @@ class TemporalUnet_mode(nn.Module): # continum task...
     def forward(self, x, time,mode):
         '''
             x : [ batch x horizon x transition ] transition=S+A+TASK+RTG
-            returns : [batch x horizon]
+            time : [batch x 1]
+            mode : [batch x 1]
         '''
         if self.calc_energy: 
             x_inp = x
