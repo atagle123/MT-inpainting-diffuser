@@ -415,7 +415,7 @@ class GaussianDiffusion_task_rtg(nn.Module):
         return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
 
     @torch.no_grad()
-    def p_sample_loop(self, shape,traj_known, mode, verbose=True, return_chain=False):
+    def p_sample_loop(self, shape,traj_known, mode, verbose=False, return_chain=False):
         """ Classical DDPM (check this) sampling algorithm 
         
         """
@@ -423,12 +423,10 @@ class GaussianDiffusion_task_rtg(nn.Module):
 
         batch_size = shape[0]
         mask=self.get_mask_from_batch(mode) # (B,H,T) same dims as x 
-        mode=mode.repeat(batch_size,1).float()
+        mode=mode.repeat(batch_size,1).float() # B,1
 
-        # assume mode is in a batch of the way (B,1) 
-        #mask=mask.repeat(batch_size,1,1)
         x = torch.randn(shape, device=device) # TODO:  en dd usan 0.5*torch.randn(shape, device=device) y no en mtdiff
-        x=traj_known*mask+x*(1-mask) # TODO check this...
+        x=traj_known*mask+x*(1-mask) 
         
         chain = [x] if return_chain else None  
         progress = utils.Progress(self.n_timesteps) if verbose else utils.Silent()
@@ -452,11 +450,14 @@ class GaussianDiffusion_task_rtg(nn.Module):
         '''
             conditions : [ (time, state), ... ]
         '''
-        #device = self.betas.device
         horizon = horizon_sample or self.horizon
         shape = (batch_size_sample, horizon, self.transition_dim)
 
         return self.p_sample_loop(shape,traj_known, mode, **sample_kwargs)
+    
+
+    def forward(self,traj_known,mode, *args, **kwargs):
+        return self.conditional_sample(traj_known, mode, *args, **kwargs) 
 
     #------------------------------------------ training ------------------------------------------#
 
@@ -472,46 +473,21 @@ class GaussianDiffusion_task_rtg(nn.Module):
         return sample
 
     def p_losses(self, x_start, t):
-        noise = torch.randn_like(x_start)
 
+        noise = torch.randn_like(x_start)
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
 
-        ### opcion 1 ###
         mode_batch=self.bernoulli_dist.sample(sample_shape=(x_noisy.size(0), )).to(x_noisy.device).long() # (B,1) 0 o 1...
-       # print("mode",mode_batch)
         mask=self.get_mask_from_batch(mode_batch) # (B,H,T) same dims as x 
-       # print("mask0",mask[0,:,:])
-      #  print("mask1",mask[1,:,:])
-        assert mask.shape==x_noisy.shape # TODO sacar assert 
+ 
+        assert mask.shape==x_noisy.shape 
 
-        x_noisy=x_start*mask+x_noisy*(1-mask) # conditioning with mask... # TODO check this (works and the mask do what we want... )
-       # print(x_start[0,:,:],"start0")
-      #  print(x_start[1,:,:],"start1")
-
-       # print("xnoisy0",x_noisy[0,:,:])
-      #  print("xnoisy1",x_noisy[1,:,:])
-        #noise=noise*(1-mask) # Check also this
+        x_noisy=x_start*mask+x_noisy*(1-mask) # conditioning with mask...
         loss_weights=self.loss_weights*(1-mask)
-     #   print("Noise to pred 0",loss_weights[0,:,:])
-    #    print("Noise to pred 1",loss_weights[1,:,:])
-        ############
-
-        ### opcion 2 ### faster... duplicate the batch... 
-       #  mode=self.bernoulli_dist.sample(sample_shape=(x_noisy.size(0), 1)).to(x_noisy.device).float() # (B,1) 0 o 1...
-        
-      #  mask=get_mask_from_batch(mode_batch,mask_dict) (B,H,T) same dims as x 
-        
-    #    x_noisy=x_start*mask+x_noisy*(1-mask) # conditioning with mask... # TODO check this (works and the mask do what we want... )
-        #noise=noise*(1-mask) # Check also this
-        ############
-        
-#TODO APLICAR RANDOM CONDITIONING PARA LOS MODOS... 
-# TODO ver para pasar multiples task y que dataset tenga bien repartidos los task... en metaworld 
-        #mode...
-        mode_batch=mode_batch.float().unsqueeze(-1)
-
-        mode_batch.requires_grad = True
+ 
         t = torch.tensor(t, dtype=torch.float, requires_grad=True)
+        mode_batch=mode_batch.float().unsqueeze(-1)
+        mode_batch.requires_grad = True
         x_noisy.requires_grad= True
         noise.requires_grad = True
 
@@ -530,11 +506,6 @@ class GaussianDiffusion_task_rtg(nn.Module):
         t = torch.randint(0, self.n_timesteps, (batch_size,), device=x.device).long()
 
         return self.p_losses(x, t)
-
-
-
-    def forward(self,traj_known,mode, *args, **kwargs):
-        return self.conditional_sample(traj_known, mode, *args, **kwargs) # TODO: repaint sampling... faltan hiperparametros del sampling... 
     
 
 
@@ -544,3 +515,13 @@ class GaussianDiffusion_task_rtg(nn.Module):
     # differiented reward function...
     # conditioned on returns
     # conditioned on mode ( exploration, task inference, planning) or: task planning and exploration
+
+
+            ### opcion 2 ### faster... duplicate the batch... 
+       #  mode=self.bernoulli_dist.sample(sample_shape=(x_noisy.size(0), 1)).to(x_noisy.device).float() # (B,1) 0 o 1...
+        
+      #  mask=get_mask_from_batch(mode_batch,mask_dict) (B,H,T) same dims as x 
+        
+    #    x_noisy=x_start*mask+x_noisy*(1-mask) # conditioning with mask... # TODO check this (works and the mask do what we want... )
+        #noise=noise*(1-mask) # Check also this
+        ############
