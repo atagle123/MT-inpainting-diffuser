@@ -53,7 +53,7 @@ class SequenceDataset(torch.utils.data.Dataset):
         self.normalize_dataset(normed_keys=self.normed_keys,normalizer=import_class(normalizer))
         self.get_norm_keys_dim()
 
-        #self.sanity_test() # TODO
+        #self.sanity_test()
 
 
     def get_env_attributes(self):
@@ -134,7 +134,7 @@ class SequenceDataset(torch.utils.data.Dataset):
 
                     dict[key]=attribute
 
-            self.episodes[ep_id]=dict # TODO check this... 
+            self.episodes[ep_id]=dict
 
 
     def get_norm_keys_dim(self):
@@ -154,7 +154,7 @@ class SequenceDataset(torch.utils.data.Dataset):
         
         for ep_id,episode_dict in self.episodes.items():  # assumes padding fix it to use no padding
             
-            episode_lenght=len(episode_dict["actions"])   # uses actions as reference TODO check this... 
+            episode_lenght=len(episode_dict["actions"])
 
             assert self.max_path_length>=episode_lenght
             
@@ -182,7 +182,7 @@ class SequenceDataset(torch.utils.data.Dataset):
         return len(self.indices)
     
 
-    def __getitem__(self, idx): # TODO maybe not implement... 
+    def __getitem__(self, idx):
         ep_id, start, end = self.indices[idx]
         episode=self.episodes[ep_id]
 
@@ -224,7 +224,7 @@ class SequenceDataset(torch.utils.data.Dataset):
             for rew in rewards:
                 rtg_partial=(rtg_partial-rew[0])/self.discount
                 horizon-=1
-                rtg_list.append(np.exp(rtg_partial*norm_factors[horizon])) # TODO CHeck this
+                rtg_list.append(np.exp(rtg_partial*norm_factors[horizon]))
             
             returns_array=np.array(rtg_list[:-1],dtype=np.float32)
             assert returns_array.shape[0]==rewards.shape[0]
@@ -241,7 +241,7 @@ class SequenceDataset(torch.utils.data.Dataset):
 
     def calculate_norm_rtg(self,rewards,horizon,discount,discount_array):
 
-            rtg=np.sum(rewards*discount_array) # (H,1)*(H,1)-> 1 #TODO check this
+            rtg=np.sum(rewards*discount_array) # (H,1)*(H,1)-> 1
 
             norm_factor=(1-discount)/(1-discount**(horizon+1))
             norm_rtg=rtg*norm_factor
@@ -333,7 +333,7 @@ class Maze2d_inpaint_dataset(SequenceDataset):
         returns=episode["returns"][start:end]
         task=episode["task"][start:end]
 
-        trajectories = np.concatenate([actions, observations,rewards,returns,task], axis=-1) # check this
+        trajectories = np.concatenate([actions, observations,rewards,returns,task], axis=-1)
 
         batch = Batch(trajectories)
 
