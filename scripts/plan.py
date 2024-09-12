@@ -108,14 +108,14 @@ def measure_task_inference_error():
     batch = batch_to_device(batch)  # batch to device # check this... # TODO maybe it can perform quicly
     mode_batch=torch.tensor([1]).to(device)
 
-    traj = policy(*batch, mode_batch, verbose=args["verbose"])
+    traj = policy(*batch, mode_batch)
     pred=torch.mean(traj[:,:,-2:],dim=(0,1))
     target=torch.mean(batch.trajectories[0,:,-2:],dim=0)
     loss = mse_loss_fn(pred, target)
     return(loss)
 
 losses=[]
-for i in range(100):
+for i in range(500):
     loss=measure_task_inference_error()
     losses.append(loss)
 
@@ -161,7 +161,7 @@ for t in range(args["max_episode_length"]):
 
     ## format current observation for conditioning
     conditions = {0: observation} # TODO change observations... 
-    action, samples = policy(conditions, batch_size=args["batch_size"], verbose=args["verbose"])
+    action, samples = policy(conditions, batch_size=args["batch_size"])
     ## execute action in environment
     next_observation, reward, terminated, truncated, _ = env.step(action)
     ## print reward and score

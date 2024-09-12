@@ -58,10 +58,11 @@ class Policy:
         self.task_dim=diffusion_model.task_dim
         self.gamma=gamma
         self.sample_kwargs = sample_kwargs
+        print(self.sample_kwargs)
 
-    def __call__(self, conditions, mode, verbose=True):
+    def __call__(self, conditions, mode):
         """
-        Function to to get the data from a dict of args
+        Main policy function that normalizes the data, calls the model and returns the result
 
         Args:
             conditions (torch.tensor): (B,H,T) a tensor filled with the known info and with 0 in everywhere else.
@@ -87,7 +88,7 @@ class Policy:
         
 
         ## run reverse diffusion process
-        trajectories = self.diffusion_model(conditions, mode, verbose=verbose, **self.sample_kwargs) # 
+        trajectories = self.diffusion_model(traj_known=conditions, mode=mode, **self.sample_kwargs) # 
 
         trajectories=trajectories.trajectories
      #   print(trajectories[:, :, -self.task_dim:])
