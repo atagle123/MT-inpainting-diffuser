@@ -15,8 +15,9 @@ from diffuser.utils.rollouts import TrajectoryBuffer
 #-----------------------------------------------------------------------------#
 
 dataset="maze2d"
+exp_name="rtg_sampling"
 
-args=load_experiment_params(f"logs/configs/{dataset}/configs_diffusion.txt")
+args=load_experiment_params(f"logs/configs/{dataset}/{exp_name}/configs_diffusion.txt")
 
 set_seed(args["seed"]) # TODO maybe change this... 
 
@@ -31,8 +32,6 @@ n_diffusion_steps= args["n_diffusion_steps_sample"]
 current_dir=os.getcwd()
 
 #ponerle nombre al experimento
-
-exp_name="123"#f"H{horizon}_T{n_diffusion_steps}_d{discount}_s{args["scale"]}_b{args["batch_size"]}"
 
 diffusion_loadpath=os.path.join(current_dir,args["logbase"], args["dataset_name"],"diffusion", exp_name)
 

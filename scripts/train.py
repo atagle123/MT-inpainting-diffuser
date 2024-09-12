@@ -14,8 +14,9 @@ import wandb
 #-----------------------------------------------------------------------------#
 
 dataset="maze2d"
+exp_name="rtg_sampling"
 
-args=load_experiment_params(f"logs/configs/{dataset}/configs_diffusion.txt")
+args=load_experiment_params(f"logs/configs/{dataset}/{exp_name}/configs_diffusion.txt")
 
 set_seed(args["seed"])
 
@@ -25,7 +26,6 @@ print(f"DEVICE: {device}")
 ## serialization
 current_dir=os.getcwd()
 
-exp_name="123"#f"H{args["horizon"]}_T{args["n_diffusion_steps"]}"
 savepath=os.path.join(current_dir,args["logbase"], args["dataset_name"],"diffusion", exp_name)
 os.makedirs(savepath, exist_ok=True)
 
@@ -101,7 +101,7 @@ diffusion = diffusion_config(model)
 trainer_config = Config(
     Trainer,
     savepath=(savepath, 'trainer_config.pkl'),
-    train_batch_size=args["batch_size"], # batch size number
+    train_batch_size=args["batch_size"], 
     train_lr=args["learning_rate"],
     gradient_accumulate_every=args["gradient_accumulate_every"],
     ema_decay=args["ema_decay"],
@@ -133,12 +133,11 @@ print('✓')
 #-----------------------------------------------------------------------------#
 
 n_epochs = int(args["n_train_steps"] // args["n_steps_per_epoch"])
-wandb_name="123"#f"{args["dataset_name"]}_diffusion_H{args["horizon"]}_T{args["n_diffusion_steps"]}"
 
 if args["wandb_log"]:
     wandb.init(
         project='Diffusion_RL_thesis',
-        name=wandb_name,
+        name=exp_name,
         monitor_gym=True,
         save_code=True)
     
