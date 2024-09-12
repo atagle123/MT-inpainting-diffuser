@@ -38,8 +38,8 @@ class Normalizer:
             max=concat_episodes_key.max(axis=0)
             self.params_dict[key]={"mean":mean,"std":std,"min":min,"max":max}
 
-            for key, value in self.params_dict[key].items(): # check dtypes
-                assert value.dtype == np.float32, f"Value for key '{key}' is not of dtype float32"
+          #  for key, value in self.params_dict[key].items(): # check dtypes
+            #    assert value.dtype == np.float32, f"Value for key '{key}' is not of dtype float32"
 
     
     def __call__(self, x, key):

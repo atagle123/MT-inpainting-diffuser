@@ -45,15 +45,14 @@ dataset_config = Config(
     termination_penalty=args["termination_penalty"],
     seed=args["seed"],
     use_padding=args["use_padding"],
-    view_keys=args["view_keys"],
     normed_keys=args["normed_keys"],
+    view_keys_dict=args["view_keys_dict"],
     discount=args["discount"])
 
 dataset = dataset_config()
-
 observation_dim = dataset.observation_dim
 action_dim = dataset.action_dim
-task_dim=2
+task_dim=dataset.keys_dim_dict["task"]
 
 
 
