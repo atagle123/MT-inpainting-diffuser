@@ -1,7 +1,7 @@
 import os
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-import diffuser.sampling as sampling
+from diffuser.sampling.policies import Policy
 from diffuser.utils.setup import load_experiment_params,set_seed
 import diffuser.utils as utils
 import wandb
@@ -14,30 +14,28 @@ from diffuser.utils.rollouts import TrajectoryBuffer
 #----------------------------------- setup -----------------------------------#
 #-----------------------------------------------------------------------------#
 
-dataset="halfcheetah"
-args=load_experiment_params(f"logs/configs/{dataset}/{dataset}-medium-v2/configs_plan.txt")
+dataset="maze2d"
 
-set_seed(args["seed"])
+args=load_experiment_params(f"logs/configs/{dataset}/configs_diffusion.txt")
+
+set_seed(int(datetime.now().timestamp()) # TODO maybe change this... 
+)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 ## diffusion model
 horizon= args["horizon"]
-n_diffusion_steps= args["n_diffusion_steps"]
+n_diffusion_steps= args["n_diffusion_steps_sample"]
 
-## value function
-discount= args["discount"]
 
 ## loading
-diffusion_loadpath= f'diffusion/H{horizon}_T{n_diffusion_steps}'
-value_loadpath= f'values/H{horizon}_T{n_diffusion_steps}_d{discount}'
 current_dir=os.getcwd()
+
 #ponerle nombre al experimento
-exp_name=f"H{horizon}_T{n_diffusion_steps}_d{discount}_s{args["scale"]}_b{args["batch_size"]}"
 
-diffusion_loadpath=os.path.join(current_dir,args["logbase"], args["dataset_name"],diffusion_loadpath)
+exp_name="123"#f"H{horizon}_T{n_diffusion_steps}_d{discount}_s{args["scale"]}_b{args["batch_size"]}"
 
-value_loadpath=os.path.join(current_dir,args["logbase"], args["dataset_name"],value_loadpath)
+diffusion_loadpath=os.path.join(current_dir,args["logbase"], args["dataset_name"],"diffusion", exp_name)
 
 savepath=os.path.join(current_dir,args["logbase"], args["dataset_name"],"plans", exp_name)
 
@@ -53,29 +51,9 @@ diffusion_experiment = utils.load_diffusion(
     epoch="latest", seed=args["seed"],
 )
 
-value_experiment = utils.load_diffusion(
-    value_loadpath,
-    epoch="latest", seed=args["seed"],
-)
-
-## ensure that the diffusion model and value function are compatible with each other
-utils.check_compatibility(diffusion_experiment, value_experiment)
-
 diffusion = diffusion_experiment.ema
 dataset = diffusion_experiment.dataset
-dataset.inference_mode()
-#print(dataset.normalizer.params_dict)
-
-value_dataset=value_experiment.dataset
-value_dataset.inference_mode()
-
-## initialize value guide
-#value_function = value_experiment.ema
-
-#rew_model=Walker2d_reward(dataset)
-guide_config = utils.Config(RawValueGuide, model=rew_model, verbose=False) # value function
-guide = guide_config()
-
+#dataset.inference_mode()
 
 
 logger_config = utils.Config(
@@ -88,32 +66,78 @@ logger = logger_config()
 ## policies are wrappers around an unconditional diffusion model and a value guide
 
 policy_config = utils.Config(
-    GuidedPolicy,
-    guide=guide,
-    scale=args["scale"],  # scale sampling kwargs
+    Policy,
     diffusion_model=diffusion,
     dataset=dataset,
-    preprocess_fns=args["preprocess_fns"],
+    gamma=args["gamma"],
     ## sampling kwargs
-    sample_fn=utils.Config(args["sample_fn"]),
-    n_guide_steps=args["n_guide_steps"],
-    t_stopgrad=args["t_stopgrad"],
-    scale_grad_by_std=args["scale_grad_by_std"],
-    verbose=args["verbose"],
+    batch_size_sample=args["batch_size_sample"],
+    horizon_sample = args["horizon_sample"],
+#    n_diffusion_steps_sample = args["n_diffusion_steps_sample"],
+    return_chain=args["return_chain"]
 )
 
 policy = policy_config()
+
+
+###
+#test
+###
+import torch
+import einops
+import wandb
+
+from diffuser.utils.arrays import batch_to_device
+
+def cycle(dl):
+    while True:
+        for data in dl:
+            yield data
+
+import torch.nn as nn
+
+# Initialize MSE Loss function
+mse_loss_fn = nn.MSELoss()
+
+def measure_task_inference_error():
+    dataloader = cycle(torch.utils.data.DataLoader(
+                dataset, batch_size=1, num_workers=0, shuffle=True, pin_memory=True
+            ))
+
+    batch = next(dataloader)
+    batch = batch_to_device(batch)  # batch to device # check this... # TODO maybe it can perform quicly
+    mode_batch=torch.tensor([1]).to(device)
+
+    traj = policy(*batch, mode_batch, verbose=args["verbose"])
+    pred=torch.mean(traj[:,:,-2:],dim=(0,1))
+    target=torch.mean(batch.trajectories[0,:,-2:],dim=0)
+    loss = mse_loss_fn(pred, target)
+    return(loss)
+
+losses=[]
+for i in range(100):
+    loss=measure_task_inference_error()
+    losses.append(loss)
+
+# Compute the mean of the losses
+mean_loss = sum(losses) / len(losses)
+
+print("Losses per iteration:")
+print(losses)
+print("\nMean Loss:")
+print(mean_loss)
+  #  print(traj[:,:,:-2],"pred")
+   # print(batch.trajectories[0,:,:-2],"actual")
+  #  print( (traj[0:,:,:-2]==batch.trajectories[0,:,:-2]).all())
 #-----------------------------------------------------------------------------#
 #--------------------------------- main loop ---------------------------------#
 #-----------------------------------------------------------------------------#
 
 
-# si hacemos que dataset sea una instancia de value dataset, podemos obtener el score
-
 env = dataset.minari_dataset.recover_environment(render_mode="rgb_array_list") # probar con rgb array list
 #env = gym.make("HalfCheetah-v5",render_mode="rgb_array_list")
 
-seed = int(datetime.now().timestamp())
+seed = int(datetime.now().timestamp()) # TODO maybe change this... 
 print(f"Using seed:{seed}")
 
 observation, _ = env.reset(seed=seed)   
@@ -136,7 +160,7 @@ total_reward = 0
 for t in range(args["max_episode_length"]):
 
     ## format current observation for conditioning
-    conditions = {0: observation}
+    conditions = {0: observation} # TODO change observations... 
     action, samples = policy(conditions, batch_size=args["batch_size"], verbose=args["verbose"])
     ## execute action in environment
     next_observation, reward, terminated, truncated, _ = env.step(action)
@@ -177,7 +201,6 @@ writer.close()
 
 if wandb_log: wandb.log({"video": wandb.Video(filepath)})
 
-#score = value_dataset.normalize_value(total_reward)  # ojo con esto, dataset tiene que ser una instancia de value dataset y estar normed, probable recurrir a infos y tilizar datos externos...
 
 ## write results to json file at `args.savepath`
-logger.finish(t, total_reward, terminated, diffusion_experiment, value_experiment,seed,args["scale"],args["batch_size"])
+logger.finish(t, total_reward, terminated, diffusion_experiment,seed,args["scale"],args["batch_size"])

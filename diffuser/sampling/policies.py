@@ -1,13 +1,8 @@
 from collections import namedtuple
 import torch
-import einops
-import pdb
-
-import diffuser.utils as utils
-from diffuser.datasets.preprocessing import get_policy_preprocess_fn  # que es esta wea
 
 
-Trajectories = namedtuple('Trajectories', 'actions observations rewards')
+Trajectories = namedtuple('Trajectories', 'actions observations rewards task')
 
 
 def compute_reward_to_go_batch(rewards_batch, gamma):
@@ -36,9 +31,9 @@ def compute_reward_to_go_batch(rewards_batch, gamma):
     return reward_to_go_batch
 
 
-def sort_by_values(actions, observations, rewards, no_inpaint_step,gamma): # refactorizar funcion
+def sort_by_values(actions, observations, rewards,gamma): # refactorizar funcion
     """
-    [B,past_H+future_H,(A+S+R)]
+    [B,H,(A+S+R)]
     """
     values=compute_reward_to_go_batch(rewards,gamma) # (B,H,1)-> (B)
 
@@ -55,13 +50,12 @@ def sort_by_values(actions, observations, rewards, no_inpaint_step,gamma): # ref
 
 class Policy:
 
-    def __init__(self, diffusion_model, dataset, preprocess_fns,gamma, **sample_kwargs):
+    def __init__(self, diffusion_model, dataset,gamma, **sample_kwargs):
         self.diffusion_model = diffusion_model
         self.dataset = dataset # dataset is a instance of the class sequence dataset
         self.action_dim = diffusion_model.action_dim
         self.observation_dim = diffusion_model.observation_dim
         self.task_dim=diffusion_model.task_dim
-        self.preprocess_fn = get_policy_preprocess_fn(preprocess_fns)
         self.gamma=gamma
         self.sample_kwargs = sample_kwargs
 
@@ -78,45 +72,48 @@ class Policy:
             df: dataframe with the data
         falta revisar que no inpaint step funcione, el sort tambien y la unnormalizacion tambien. evaluar todo aca.
         """
-        normed_rewards_condition = conditions[:, :, self.action_dim+self.observation_dim:self.action_dim+self.observation_dim+1]
-        conditions[:, :, self.action_dim+self.observation_dim:self.action_dim+self.observation_dim+1] = self.dataset.normalizer.normalize_torch(normed_rewards_condition, 'rewards') # normalizar solo acciones y observaciones ... aunque tambien se podrian normalizar las rewards... probar esto... 
+      #  normed_rewards_condition = conditions[:, :, self.action_dim+self.observation_dim:self.action_dim+self.observation_dim+1]
+       # conditions[:, :, self.action_dim+self.observation_dim:self.action_dim+self.observation_dim+1] = self.dataset.normalizer.normalize_torch(normed_rewards_condition, 'rewards') # normalizar solo acciones y observaciones ... aunque tambien se podrian normalizar las rewards... probar esto... 
         
         ## extract action [ batch_size x horizon x transition_dim + 1 ] transition_dim=actions+observations+rewards / + goal
-        normed_actions_condition = conditions[:, :, :self.action_dim]
-        conditions[:, :, :self.action_dim] = self.dataset.normalizer.normalize_torch(normed_actions_condition, 'actions') # normalizar solo acciones y observaciones ... aunque tambien se podrian normalizar las rewards... probar esto... 
+       # normed_actions_condition = conditions[:, :, :self.action_dim]
+       # conditions[:, :, :self.action_dim] = self.dataset.normalizer.normalize_torch(normed_actions_condition, 'actions') # normalizar solo acciones y observaciones ... aunque tambien se podrian normalizar las rewards... probar esto... 
 
-        normed_observations_condition = conditions[:, :, self.action_dim:self.action_dim+self.observation_dim]
-        conditions[:, :, self.action_dim:self.action_dim+self.observation_dim] = self.dataset.normalizer.normalize_torch(normed_observations_condition, 'observations')
+        #normed_observations_condition = conditions[:, :, self.action_dim:self.action_dim+self.observation_dim]
+        #conditions[:, :, self.action_dim:self.action_dim+self.observation_dim] = self.dataset.normalizer.normalize_torch(normed_observations_condition, 'observation')
 
-        normed_task_condition = conditions[:, :, -self.task_dim:] # TODO check... 
-        conditions[:, :, -self.task_dim:] = self.dataset.normalizer.normalize_torch(normed_task_condition, 'desired_goal')
+       # normed_task_condition = conditions[:, :, -self.task_dim:] # TODO check... 
+       # conditions[:, :, -self.task_dim:] = self.dataset.normalizer.normalize_torch(normed_task_condition, 'desired_goal')
         
 
         ## run reverse diffusion process
         trajectories = self.diffusion_model(conditions, mode, verbose=verbose, **self.sample_kwargs) # 
 
-        normed_rewards = trajectories[:, :, self.action_dim+self.observation_dim:self.action_dim+self.observation_dim+1]
-        rewards = self.dataset.normalizer.unnormalize_torch(normed_rewards, 'rewards') # normalizar solo acciones y observaciones ... aunque tambien se podrian normalizar las rewards... probar esto... 
+        trajectories=trajectories.trajectories
+     #   print(trajectories[:, :, -self.task_dim:])
+        #normed_rewards = trajectories[:, :, self.action_dim+self.observation_dim:self.action_dim+self.observation_dim+1]
+        #rewards = self.dataset.normalizer.unnormalize_torch(normed_rewards, 'rewards') # normalizar solo acciones y observaciones ... aunque tambien se podrian normalizar las rewards... probar esto... 
         
         ## extract action [ batch_size x horizon x transition_dim + 1 ] transition_dim=actions+observations+rewards / + goal
-        normed_actions = trajectories[:, :, :self.action_dim]
-        actions = self.dataset.normalizer.unnormalize_torch(normed_actions, 'actions') # normalizar solo acciones y observaciones ... aunque tambien se podrian normalizar las rewards... probar esto... 
+        #normed_actions = trajectories[:, :, :self.action_dim]
+        #actions = self.dataset.normalizer.unnormalize_torch(normed_actions, 'actions') # normalizar solo acciones y observaciones ... aunque tambien se podrian normalizar las rewards... probar esto... 
 
-        normed_observations = trajectories[:, :, self.action_dim:self.action_dim+self.observation_dim]
-        observations = self.dataset.normalizer.unnormalize_torch(normed_observations, 'observations')
+      #  normed_observations = trajectories[:, :, self.action_dim:self.action_dim+self.observation_dim]
+      #  observations = self.dataset.normalizer.unnormalize_torch(normed_observations, 'observation')
 
-        normed_task = trajectories[:, :, -self.task_dim:] # TODO check... maybe do one function per sampling mode... 
-        task = self.dataset.normalizer.normalize_torch(normed_task, 'desired_goal')
+      #  normed_task = trajectories[:, :, -self.task_dim:] # TODO check... maybe do one function per sampling mode... 
+       # task = self.dataset.normalizer.unnormalize_torch(normed_task, 'desired_goal')
 
         #TODO ver donde pponer el task sorted.. 
-        actions_sorted, observations_sorted, rewards_sorted, values = sort_by_values(actions, observations, rewards, gamma=self.gamma) #sort by sampled returns. quizas esta no es la mejor metrica? puede ser que sea inconsistente? 
+       # actions_sorted, observations_sorted, rewards_sorted, values = sort_by_values(actions, observations, rewards, gamma=self.gamma) #sort by sampled returns. quizas esta no es la mejor metrica? puede ser que sea inconsistente? 
         # TODO ver que es mejor, si ordenar el rtg o los rewards... 
         ## extract first action
-        action = actions_sorted[0, 0]
+     #   action = actions_sorted[0, 0]
 
-        trajectories = Trajectories(actions_sorted, observations_sorted, rewards_sorted,task) # generalizar aca ...
+      #  trajectories = Trajectories(actions_sorted, observations_sorted, rewards_sorted,task) # generalizar aca ...
 
-        return action, trajectories, values
+      #  return action, trajectories,task
+        return(trajectories)
 
     @property
     def device(self):
