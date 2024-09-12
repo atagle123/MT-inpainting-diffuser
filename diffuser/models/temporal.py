@@ -380,9 +380,7 @@ class TemporalUnet_task_rtg(nn.Module): # continum task...
             return x
         
 
-
-
-class TemporalUnet_task_rtg_2(nn.Module): # continum task... 
+class TemporalUnet_mode(nn.Module): # continum task... 
     """
     Task inference specific temporal u net, with no conditioning.
     """ 
@@ -485,9 +483,8 @@ class TemporalUnet_task_rtg_2(nn.Module): # continum task...
         t = self.time_mlp(time)
 
         mode_embedd=self.mode_mlp(mode)
-        #print(t.shape,mode_embedd.shape)
 
-        t = torch.cat([t,mode_embedd], dim=-1) # test 
+        t = torch.cat([t,mode_embedd], dim=-1)
 
         down_features= []
 
