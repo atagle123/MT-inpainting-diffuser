@@ -258,30 +258,39 @@ class GaussianDiffusion_task_rtg(GaussianDiffusion):
                 x_start=x_recon, x_t=x, t=t)
         return model_mean, posterior_variance, posterior_log_variance
 
-
     
     @torch.no_grad()
     def p_sample(self, x, t,mode):
         b, *_, device = *x.shape, x.device
-        t = torch.full((x.shape[0],), t, device=device, dtype=torch.long)
-        model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=t,mode_batch=mode)
-        noise = 0.5*torch.randn_like(x)
-        # no noise when t == 0
-        nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
-        return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
+        batched_time = torch.full((b,), t, device=device, dtype=torch.long)
+        model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=batched_time,mode_batch=mode)
+
+        noise = torch.randn_like(x) if t > 0 else 0. # no noise if t == 0
+
+        x_pred = model_mean + (0.5 * model_log_variance).exp() * noise
+        return x_pred
 
     @torch.no_grad()
     def p_sample_loop(self, shape,traj_known, mode, disable_progess_bar=False, return_chain=False):
-        """ Classical DDPM (check this) sampling algorithm 
+        """ 
+        Classical DDPM sampling algorithm with masking and energy guidance
+
+            Parameters:
+                shape,
+                traj_known: (B,H,T) 
+                mode: assumes is in a batch of the way (B,1)
+                disable_progess_bar=False, 
+                return_chain=False
+
+            Returns:
+            sample (B,H,T) 
         
         """
         device = self.betas.device
 
-        batch_size = shape[0]
         mask=self.get_mask_from_batch(mode) # (B,H,T) same dims as x 
-        mode=mode.repeat(batch_size,1).float() # B,1
 
-        x = torch.randn(shape, device=device) # TODO:  en dd usan 0.5*torch.randn(shape, device=device) y no en mtdiff
+        x = torch.randn(shape, device=device) # (B,H,T) same dims as x 
         x=traj_known*mask+x*(1-mask) 
         
         chain = [x] if return_chain else None  
@@ -296,12 +305,14 @@ class GaussianDiffusion_task_rtg(GaussianDiffusion):
         return Sample(x,  chain)
 
     @torch.no_grad()
-    def conditional_sample(self,traj_known, mode,  horizon_sample=None,batch_size_sample=32, **sample_kwargs):
+    def conditional_sample(self,traj_known, mode,  horizon_sample=None, **sample_kwargs):
         '''
             conditions : [ (time, state), ... ]
         '''
         horizon = horizon_sample or self.horizon
-        shape = (batch_size_sample, horizon, self.transition_dim)
+        shape = (len(traj_known), horizon, self.transition_dim)
+
+        assert shape[0]==len(mode) # same batch size
 
         return self.p_sample_loop(shape,traj_known, mode, **sample_kwargs)
     
@@ -319,7 +330,7 @@ class GaussianDiffusion_task_rtg(GaussianDiffusion):
         mode_batch=self.bernoulli_dist.sample(sample_shape=(x_noisy.size(0), )).to(x_noisy.device).long() # (B,1) 0 o 1...
         mask=self.get_mask_from_batch(mode_batch) # (B,H,T) same dims as x 
  
-        assert mask.shape==x_noisy.shape 
+        assert mask.shape==x_noisy.shape
 
         x_noisy=x_start*mask+x_noisy*(1-mask) # conditioning with mask...
         loss_weights=self.loss_weights*(1-mask)
@@ -482,11 +493,26 @@ class GaussianDiffusion_repaint(GaussianDiffusion):
                 disable_progess_bar=False, 
                 return_chain=False
                 ):
-        """ Classical DDPM (check this) sampling algorithm with repaint sampling
+        """ 
+        Classical DDPM (check this) sampling algorithm with repaint sampling
+
+            Parameters:
+                shape:
+                traj_known: (B,H,T) same dims as x 
+                mask: (B,H,T) same dims as x 
+                resample=True,
+                resample_iter=10,
+                resample_jump=3,
+                resample_every=50,
+                disable_progess_bar=False, 
+                return_chain=False
+
+            Returns:
+            sample
         
         """
 
-        device, batch_size = self.betas.device, shape[0]
+        device = self.betas.device
 
         x = torch.randn(shape, device=device)
         
@@ -516,7 +542,6 @@ class GaussianDiffusion_repaint(GaussianDiffusion):
                 traj_known,
                 mask,
                 horizon_sample=None,
-                batch_size_sample=32,
                 resample=True,
                 resample_iter=10,
                 resample_jump=3,
@@ -528,9 +553,13 @@ class GaussianDiffusion_repaint(GaussianDiffusion):
             conditions : [ (time, state), ... ]
         '''
         horizon = horizon_sample or self.horizon
+        
+        batch_size=len(traj_known)
+
+        assert batch_size==len(mask)
 
         return self.p_sample_loop(
-                shape=(batch_size_sample, horizon, self.transition_dim),
+                shape=(batch_size, horizon, self.transition_dim),
                 traj_known=traj_known,
                 mask=mask,
                 resample=resample,
@@ -545,7 +574,6 @@ class GaussianDiffusion_repaint(GaussianDiffusion):
                 traj_known,
                 mask,
                 horizon_sample=None,
-                batch_size_sample=32,
                 resample=True,
                 resample_iter=10,
                 resample_jump=3,
@@ -558,7 +586,6 @@ class GaussianDiffusion_repaint(GaussianDiffusion):
                 traj_known=traj_known,
                 mask=mask,
                 horizon_sample=horizon_sample,
-                batch_size_sample=batch_size_sample,
                 resample=resample,
                 resample_iter=resample_iter,
                 resample_jump=resample_jump,

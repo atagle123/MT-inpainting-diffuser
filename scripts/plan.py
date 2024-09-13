@@ -95,6 +95,7 @@ def measure_task_inference_error():
     batch = next(dataloader)
     batch = batch_to_device(batch)  # batch to device # check this... # TODO maybe it can perform quicly
     mode_batch=torch.tensor([1]).to(device)
+    mode_batch=mode_batch.repeat(batch_size,1).float() # B,1
 
     traj = policy(*batch, mode_batch)
     pred=torch.mean(traj[:,:,-2:],dim=(0,1))
