@@ -59,7 +59,7 @@ class Policy:
         self.gamma=gamma
         self.sample_kwargs = sample_kwargs
 
-    def __call__(self, conditions, mode):
+    def __call__(self, rollouts, mode):
         """
         Main policy function that normalizes the data, calls the model and returns the result
 

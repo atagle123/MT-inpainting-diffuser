@@ -118,20 +118,10 @@ print(mean_loss)
 #-----------------------------------------------------------------------------#
 #--------------------------------- main loop ---------------------------------#
 #-----------------------------------------------------------------------------#
-
-
-env = dataset.minari_dataset.recover_environment(render_mode="rgb_array_list") # probar con rgb array list
-#env = gym.make("HalfCheetah-v5",render_mode="rgb_array_list")
-
-seed = int(datetime.now().timestamp()) # TODO maybe change this... 
-print(f"Using seed:{seed}")
-
-observation, _ = env.reset(seed=seed)   
-
+ 
 wandb_log=args["wandb_log"]
 
 if wandb_log:
-        
     wandb.init(
         project='MT_inpainting_diffuser',
         name=exp_name,
@@ -140,16 +130,21 @@ if wandb_log:
     
 print(savepath, flush=True)
 
-rollouts=TrajectoryBuffer()
+seed = int(datetime.now().timestamp()) # TODO maybe change this... 
+print(f"Using seed:{seed}")
+
+env = dataset.minari_dataset.recover_environment(render_mode="rgb_array_list") # probar con rgb array list
+#env = gym.make("HalfCheetah-v5",render_mode="rgb_array_list")
+observation, info = env.reset(seed=seed)  
+
+rollouts=TrajectoryBuffer(observation,info)
 
 total_reward = 0
 for t in range(args["max_episode_length"]):
 
-    ## format current observation for conditioning
-    conditions = {0: observation} # TODO change observations... 
-    action, samples = policy(conditions, batch_size=args["batch_size"])
+    action, samples = policy(rollouts, batch_size=args["batch_size"]) # TODO maybe rollouts to torch 
     ## execute action in environment
-    next_observation, reward, terminated, truncated, _ = env.step(action)
+    observation, reward, terminated, truncated, info = env.step(action)
     ## print reward and score
     total_reward += reward
 
@@ -159,15 +154,11 @@ for t in range(args["max_episode_length"]):
         f'values: {samples.values} | scale: {args["scale"]}',
         flush=True,)
 
-
-    rollouts.add_transition(observation, action, reward, next_observation, terminated,total_reward)
+    rollouts.add_transition(observation, action, reward, terminated,total_reward,info)
 
     if terminated:
         break
     
-
-    observation = next_observation
-
 rollouts.end_trajectory()
 rollouts.save_trajectories(filepath=os.path.join(savepath,f'rollout_{seed}.pkl'))
 

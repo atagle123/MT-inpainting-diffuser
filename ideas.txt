@@ -13,3 +13,10 @@ TODO:
 - fix diffusion models...
 
 - ver para pasar multiples task y que dataset tenga bien repartidos los task... en metaworld 
+
+
+mode cond diff: pasa un batch con dos modos (32+32 ej) policy recibe historia..., crea el mode batch y lo pasa al modelo, el modelo crea la mascara... y despues en policy se obtienen resultados...
+
+
+repaint sampling... igual que mode cond diff se hacen dos batches uno para hacer inpainting del task y otro de la acción. o se puede pasar la historia y hacer inpainting sobre el futuro.
+

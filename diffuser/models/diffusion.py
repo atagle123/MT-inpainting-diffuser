@@ -449,7 +449,6 @@ class GaussianDiffusion_repaint(GaussianDiffusion):
 
         if mask is not None:
             mask = mask.to(device)
-         #   gt = normalize_to_neg_one_to_one(gt) TODO what is this?
             alpha_cumnprod_t = self.alphas_cumprod[t]
             gt_weight = torch.sqrt(alpha_cumnprod_t).to(device) 
             gt_part = gt_weight * traj_known
