@@ -263,6 +263,7 @@ class GaussianDiffusion_task_rtg(GaussianDiffusion):
     @torch.no_grad()
     def p_sample(self, x, t,mode):
         b, *_, device = *x.shape, x.device
+        t = torch.full((x.shape[0],), t, device=device, dtype=torch.long)
         model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=t,mode_batch=mode)
         noise = 0.5*torch.randn_like(x)
         # no noise when t == 0
@@ -286,7 +287,6 @@ class GaussianDiffusion_task_rtg(GaussianDiffusion):
         chain = [x] if return_chain else None  
 
         for t in tqdm(reversed(range(0, self.n_timesteps)), desc = 'sampling loop time step', total = self.n_timesteps,disable=disable_progess_bar):
-            t = torch.full((batch_size,), t, device=device, dtype=torch.long)
             x = self.p_sample(x, t,mode)
             x=traj_known*mask+x*(1-mask)
 
@@ -418,18 +418,16 @@ class GaussianDiffusion_repaint(GaussianDiffusion):
     #------------------------------------------ sampling ------------------------------------------#
 
 
-    @torch.enable_grad()
-    def p_mean_variance(self,x,t,mode_batch):
+    def p_mean_variance(self,x,t):
       #  if self.rtg_guidance: #TODO
 
        #     pass
 
         #else:
-        x=x.clone().detach().requires_grad_(True)
-        t=t.clone().float().detach().requires_grad_(True)
-        mode_batch=mode_batch.clone().detach().requires_grad_(True)
+        #x=x.clone().detach().requires_grad_(True)
+        t=t.clone().float().detach()#.requires_grad_(True)
 
-        epsilon = self.model(x=x, time=t,mode=mode_batch)
+        epsilon = self.model(x=x, time=t)
 
         t = t.detach().to(torch.int64)
         x_recon = self.predict_start_from_noise(x, t=t, noise=epsilon)
@@ -445,34 +443,39 @@ class GaussianDiffusion_repaint(GaussianDiffusion):
 
 
     
-    @torch.no_grad()
-    def p_sample(self, x, t,mode):
+    @torch.inference_mode()
+    def p_sample(self, x, t, traj_known, mask):
+        b, *_, device = *x.shape, x.device
+
         if mask is not None:
-            mask = mask.to(x.device)
-            gt = normalize_to_neg_one_to_one(gt)
+            mask = mask.to(device)
+         #   gt = normalize_to_neg_one_to_one(gt) TODO what is this?
             alpha_cumnprod_t = self.alphas_cumprod[t]
-            gt_weight = torch.sqrt(alpha_cumnprod_t).to(x.device) 
-            gt_part = gt_weight * gt
-            noise_weight = torch.sqrt(1 - alpha_cumnprod_t).to(x.device)
-            noise_part = noise_weight * torch.randn_like(x,device=x.device)
+            gt_weight = torch.sqrt(alpha_cumnprod_t).to(device) 
+            gt_part = gt_weight * traj_known
+            noise_weight = torch.sqrt(1 - alpha_cumnprod_t).to(device)
+            noise_part = noise_weight * torch.randn_like(x,device=device)
             weighed_gt = gt_part + noise_part
             x = (mask * weighed_gt) + ((1 - mask) * x)
 
+        batched_time = torch.full((b,), t, device=device, dtype=torch.long)
 
-        b, *_, device = *x.shape, x.device
-        model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=t,mode_batch=mode)
-        noise = 0.5*torch.randn_like(x)
-        # no noise when t == 0
-        nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
-        return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
+        model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=batched_time)
 
-    @torch.no_grad()
+        noise = torch.randn_like(x) if t > 0 else 0. # no noise if t == 0
+        x_pred = model_mean + (0.5 * model_log_variance).exp() * noise
+
+        if t==0 and mask is not None:
+            # if t == 0, we use the ground-truth image if in-painting
+            x_pred = (mask * traj_known) +  ((1 - mask) * x_pred)
+
+        return x_pred
+
+    @torch.inference_mode()
     def p_sample_loop(self,
                 shape,
                 traj_known, # (B,H,T) same dims as x 
                 mask, # (B,H,T) same dims as x 
-                horizon_sample,
-                batch_size_sample=32, # TODO ver si batchify aca o que venga de antes... 
                 resample=True,
                 resample_iter=10,
                 resample_jump=3,
@@ -491,19 +494,17 @@ class GaussianDiffusion_repaint(GaussianDiffusion):
         chain = [x] if return_chain else None
 
         for t in tqdm(reversed(range(0, self.n_timesteps)), desc = 'sampling loop time step', total = self.n_timesteps,disable=disable_progess_bar):
-            t = torch.full((batch_size,), t, device=device, dtype=torch.long)
-            x = self.p_sample(x, t)
-            x=traj_known*mask+x*(1-mask)
+            x = self.p_sample(x=x, t=t, traj_known=traj_known, mask=mask)
 
             # Resampling loop: line 9 of Algorithm 1 in https://arxiv.org/pdf/2201.09865
             if resample is True and (t > 0) and (t % resample_every == 0 or t == 1) and mask is not None:
                 # Jump back for resample_jump timesteps and resample_iter times
-                for iter in tqdm(range(resample_iter), desc = 'resample loop', total = resample_iter):
+                for iter in tqdm(range(resample_iter), desc = 'resample loop', total = resample_iter,disable=disable_progess_bar):
                     t = resample_jump
                     beta = self.betas[t]
-                    img = torch.sqrt(1 - beta) * img + torch.sqrt(beta) * torch.randn_like(img)
+                    x = torch.sqrt(1 - beta) * x + torch.sqrt(beta) * torch.randn_like(x)
                     for j in reversed(range(0, resample_jump)):
-                        x = self.p_sample(x=img, t=t, gt=gt, mask=mask)
+                        x = self.p_sample(x=x, t=t, traj_known=traj_known, mask=mask)
 
             if return_chain: chain.append(x)
 
@@ -511,7 +512,7 @@ class GaussianDiffusion_repaint(GaussianDiffusion):
         if return_chain: chain = torch.stack(chain, dim=1)
         return Sample(x,  chain)
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def conditional_sample(self,
                 traj_known,
                 mask,
@@ -533,8 +534,6 @@ class GaussianDiffusion_repaint(GaussianDiffusion):
                 shape=(batch_size_sample, horizon, self.transition_dim),
                 traj_known=traj_known,
                 mask=mask,
-                horizon_sample=horizon_sample,
-                batch_size_sample=batch_size_sample,
                 resample=resample,
                 resample_iter=resample_iter,
                 resample_jump=resample_jump,
@@ -542,7 +541,7 @@ class GaussianDiffusion_repaint(GaussianDiffusion):
                 disable_progess_bar=disable_progess_bar, 
                 return_chain=return_chain)
     
-
+    @torch.inference_mode()
     def forward(self,
                 traj_known,
                 mask,
