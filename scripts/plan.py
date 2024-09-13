@@ -15,11 +15,11 @@ from diffuser.utils.rollouts import TrajectoryBuffer
 #-----------------------------------------------------------------------------#
 
 dataset="maze2d"
-exp_name="rtg_sampling"
+exp_name="rtg_sampling_epsilon"
 
 args=load_experiment_params(f"logs/configs/{dataset}/{exp_name}/configs_diffusion.txt")
 
-set_seed(args["seed"])
+set_seed(12)#args["seed"])
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -103,7 +103,7 @@ def measure_task_inference_error():
     return(loss)
 
 losses=[]
-for i in range(500):
+for i in range(100):
     loss=measure_task_inference_error()
     losses.append(loss)
 
@@ -133,7 +133,7 @@ wandb_log=args["wandb_log"]
 if wandb_log:
         
     wandb.init(
-        project='Diffusion_RL_thesis',
+        project='MT_inpainting_diffuser',
         name=exp_name,
         monitor_gym=True,
         save_code=True)

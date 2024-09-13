@@ -98,7 +98,7 @@ class Trainer(object):
 
         timer = Timer()
         for step in range(n_train_steps):
-
+            self.step += 1
             for i in range(self.gradient_accumulate_every):
                 batch = next(self.dataloader)
                 batch = batch_to_device(batch)  # batch to device # check this... # TODO maybe it can perform quicly 
@@ -134,7 +134,6 @@ class Trainer(object):
             if self.sample_freq and self.step % self.sample_freq == 0:
                 pass                #self.render_samples()
 
-            self.step += 1
 
     def save(self, epoch):
         '''

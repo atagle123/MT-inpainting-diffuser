@@ -14,7 +14,7 @@ import wandb
 #-----------------------------------------------------------------------------#
 
 dataset="maze2d"
-exp_name="rtg_sampling"
+exp_name="rtg_sampling_epsilon"
 
 args=load_experiment_params(f"logs/configs/{dataset}/{exp_name}/configs_diffusion.txt")
 
@@ -72,8 +72,7 @@ model_config = Config(
     dim=args["dim"],
     dim_mults=args["dim_mults"],
     attention=args["attention"],
-    calc_energy=args["calc_energy"],
-    task_dim=task_dim
+    calc_energy=args["calc_energy"]
     )
 
 
@@ -137,7 +136,7 @@ n_epochs = int(args["n_train_steps"] // args["n_steps_per_epoch"])
 
 if args["wandb_log"]:
     wandb.init(
-        project='Diffusion_RL_thesis',
+        project='MT_inpainting_diffuser',
         name=exp_name,
         monitor_gym=True,
         save_code=True)

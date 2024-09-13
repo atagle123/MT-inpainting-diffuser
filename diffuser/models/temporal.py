@@ -573,8 +573,6 @@ class TemporalUnet_mode(nn.Module): # continum task...
             time : [batch x 1]
             mode : [batch x 1]
         '''
-        if self.calc_energy: 
-            x_inp = x
 
         x = einops.rearrange(x, 'b h t -> b t h')
 
@@ -608,14 +606,7 @@ class TemporalUnet_mode(nn.Module): # continum task...
 
         x = einops.rearrange(x, 'b t h -> b h t')
 
-        if self.calc_energy:
-            # Energy function
-
-            energy = ((x - x_inp)**2).mean()
-            grad = torch.autograd.grad(outputs=energy, inputs=x_inp, create_graph=True)
-            return grad[0]
-        else:
-            return x
+        return x
         
 
     

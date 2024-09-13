@@ -234,16 +234,14 @@ class GaussianDiffusion_task_rtg(GaussianDiffusion):
     #------------------------------------------ sampling ------------------------------------------#
 
 
-    @torch.enable_grad()
+    @torch.no_grad()
     def p_mean_variance(self,x,t,mode_batch):
       #  if self.rtg_guidance: #TODO
 
        #     pass
 
         #else:
-        x=x.clone().detach().requires_grad_(True)
-        t=t.clone().float().detach().requires_grad_(True)
-        mode_batch=mode_batch.clone().detach().requires_grad_(True)
+        t=t.clone().float().detach()
 
         epsilon = self.model(x=x, time=t,mode=mode_batch)
 
@@ -330,11 +328,8 @@ class GaussianDiffusion_task_rtg(GaussianDiffusion):
         x_noisy=x_start*mask+x_noisy*(1-mask) # conditioning with mask...
         loss_weights=self.loss_weights*(1-mask)
  
-        t = torch.tensor(t, dtype=torch.float, requires_grad=True)
+        t = torch.tensor(t, dtype=torch.float)
         mode_batch=mode_batch.float().unsqueeze(-1)
-        mode_batch.requires_grad = True
-        x_noisy.requires_grad= True
-        noise.requires_grad = True
 
         pred_epsilon = self.model(x_noisy,t,mode_batch)
 
