@@ -155,7 +155,7 @@ class GaussianDiffusion_task_rtg(GaussianDiffusion):
         self.observation_dim = observation_dim
         self.action_dim = action_dim
         self.task_dim=task_dim
-        self.transition_dim = observation_dim + action_dim+1+task_dim+1 # (S+A+R+G+rtg)
+        self.transition_dim = observation_dim + action_dim+1+task_dim+1 # (S+A+R+rtg+G)
         self.model = model
         self.action_weight=action_weight
         self.rtg_weight=rtg_weight
@@ -429,18 +429,47 @@ class GaussianDiffusion_repaint(GaussianDiffusion):
     #------------------------------------------ sampling ------------------------------------------#
 
 
-    def p_mean_variance(self,x,t):
-      #  if self.rtg_guidance: #TODO
+    def p_mean_variance(self,x,t,rtg_guidance):
 
-       #     pass
+        t=t.clone().float().detach()
+        if rtg_guidance:
+            rtg_mask = torch.zeros(x.shape)
+            rtg_mask[:,0,self.observation_dim+self.action_dim+1] # TODO check this... 
+            t=t.clone().float().detach()#.requires_grad_(True)
+            x=x.clone().detach().requires_grad_(True)
+            epsilon = self.model(x=x, time=t)
 
-        #else:
-        #x=x.clone().detach().requires_grad_(True)
-        t=t.clone().float().detach()#.requires_grad_(True)
+            t = t.detach().to(torch.int64)
+            x_recon = self.predict_start_from_noise(x, t=t, noise=epsilon)
+            rtg_exp_pred=x_recon*rtg_mask
+            log=torch.log(rtg_exp_pred)
+            energy_guide=torch.autograd.grad([log], [x])[0]
+           # log.backward()
+           # energy_guide=x.grad
+            t = t.detach().to(torch.int64)
+            epsilon=-extract(self.sqrt_one_minus_alphas_cumprod, t, x.shape)*energy_guide+epsilon # TODO check the sign
+            """
+            class ValueGuide(nn.Module):
 
-        epsilon = self.model(x=x, time=t)
+                def __init__(self, model):
+                    super().__init__()
+                    self.model = model
 
-        t = t.detach().to(torch.int64)
+                def forward(self, x, cond, t):
+                    output = self.model(x, cond, t)
+                    return output.squeeze(dim=-1)
+
+                def gradients(self, x, *args):
+                    x.requires_grad_()
+                    y = self(x, *args)
+                    grad = torch.autograd.grad([y.sum()], [x])[0]
+                    x.detach()
+                    return y, grad
+            """
+        else:
+            epsilon = self.model(x=x, time=t)
+            t = t.detach().to(torch.int64)
+
         x_recon = self.predict_start_from_noise(x, t=t, noise=epsilon)
 
         if self.clip_denoised:
