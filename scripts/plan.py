@@ -19,7 +19,7 @@ exp_name="rtg_sampling_epsilon"
 
 args=load_experiment_params(f"logs/configs/{dataset}/{exp_name}/configs_diffusion.txt")
 
-set_seed(12)#args["seed"])
+set_seed(args["seed"])
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 

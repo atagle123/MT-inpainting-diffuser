@@ -14,7 +14,7 @@ import wandb
 #-----------------------------------------------------------------------------#
 
 dataset="maze2d"
-exp_name="rtg_sampling_epsilon"
+exp_name="rtg_sampling_no_mask"
 
 args=load_experiment_params(f"logs/configs/{dataset}/{exp_name}/configs_diffusion.txt")
 
@@ -72,7 +72,7 @@ model_config = Config(
     dim=args["dim"],
     dim_mults=args["dim_mults"],
     attention=args["attention"],
-    calc_energy=args["calc_energy"]
+    #calc_energy=args["calc_energy"]
     )
 
 
@@ -89,7 +89,7 @@ diffusion_config = Config(
     action_weight=args["action_weight"],
     rtg_weight=args["rtg_weight"],
     loss_discount=args["loss_discount"],
-    p_mode=args["p_mode"],                    
+   # p_mode=args["p_mode"],                    
     device=device,
 )
 
@@ -113,7 +113,7 @@ trainer_config = Config(
 )
 
 trainer = trainer_config(diffusion, dataset)
-#trainer.load(epoch=20000)
+trainer.load(epoch=40000)
 
 #-----------------------------------------------------------------------------#
 #------------------------ test forward & backward pass -----------------------#
