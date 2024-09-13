@@ -1,35 +1,52 @@
+from dataclasses import dataclass, field
+import numpy as np
 import pickle
+from typing import List, Any
 
+@dataclass
+class Trajectory:
+    states: List[np.ndarray] = field(default_factory=list)
+    actions: List[np.ndarray] = field(default_factory=list)
+    rewards: List[np.ndarray] = field(default_factory=list)
+    dones: List[bool] = field(default_factory=list)
+    total_reward: List[float] = field(default_factory=list)
+    infos: List[Any] = field(default_factory=list)
+
+@dataclass
 class TrajectoryBuffer:
-    def __init__(self,first_observation,first_info):
-        self.trajectories = []  # List to hold multiple trajectories
-        self.start_trajectory(first_observation,first_info)
+    trajectories: List[Trajectory] = field(default_factory=list)
+    current_trajectory: Trajectory = field(default=None)
 
-    def start_trajectory(self,first_observation,first_info):
-        self.current_trajectory = {
-            'states': [first_observation], # states has one dim more because of the next state... 
-            'actions': [],
-            'rewards': [],
-            'dones': [],
-            'total_reward':[],
-            "infos":[first_info]# info has one dim more 
-        }
+    def __init__(self, first_observation: np.ndarray, first_info: Any):
+        self.trajectories = []  
+        self.start_trajectory(first_observation, first_info)
 
-    def add_transition(self, state, action, reward, done,total_reward,info):
-        self.current_trajectory['states'].append(state)
-        self.current_trajectory['actions'].append(action)
-        self.current_trajectory['rewards'].append(reward)
-        self.current_trajectory['dones'].append(done)
-        self.current_trajectory['total_reward'].append(total_reward)
-        self.current_trajectory['infos'].append(info)
+    def start_trajectory(self, first_observation: np.ndarray, first_info: Any):
+        self.current_trajectory = Trajectory(
+            states=[first_observation],
+            actions=[],
+            rewards=[],
+            dones=[],
+            total_reward=[],
+            infos=[first_info]
+        )
+
+    def add_transition(self, state: np.ndarray, action: np.ndarray, reward: float, done: bool, total_reward: float, info: Any):
+        self.current_trajectory.states.append(state)
+        self.current_trajectory.actions.append(action)
+        self.current_trajectory.rewards.append(np.array([reward]))
+        self.current_trajectory.dones.append(done)
+        self.current_trajectory.total_reward.append(total_reward)
+        self.current_trajectory.infos.append(info)
 
     def end_trajectory(self):
         self.trajectories.append(self.current_trajectory)
+        self.current_trajectory = None
 
-    def save_trajectories(self, filepath):
+    def save_trajectories(self, filepath: str):
         with open(filepath, 'wb') as f:
             pickle.dump(self.trajectories, f)
 
-    def load_trajectories(self, filepath):
+    def load_trajectories(self, filepath: str):
         with open(filepath, 'rb') as f:
             self.trajectories = pickle.load(f)
