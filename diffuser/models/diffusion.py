@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from torch import nn
 import pdb
+from tqdm import tqdm
 
 import diffuser.utils as utils
 from .helpers import (
@@ -269,7 +270,7 @@ class GaussianDiffusion_task_rtg(GaussianDiffusion):
         return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
 
     @torch.no_grad()
-    def p_sample_loop(self, shape,traj_known, mode, verbose=False, return_chain=False):
+    def p_sample_loop(self, shape,traj_known, mode, disable_progess_bar=False, return_chain=False):
         """ Classical DDPM (check this) sampling algorithm 
         
         """
@@ -283,18 +284,13 @@ class GaussianDiffusion_task_rtg(GaussianDiffusion):
         x=traj_known*mask+x*(1-mask) 
         
         chain = [x] if return_chain else None  
-        progress = utils.Progress(self.n_timesteps) if verbose else utils.Silent()
 
-        for i in reversed(range(0, self.n_timesteps)): 
-            t = torch.full((batch_size,), i, device=device, dtype=torch.long)
+        for t in tqdm(reversed(range(0, self.n_timesteps)), desc = 'sampling loop time step', total = self.n_timesteps,disable=disable_progess_bar):
+            t = torch.full((batch_size,), t, device=device, dtype=torch.long)
             x = self.p_sample(x, t,mode)
             x=traj_known*mask+x*(1-mask)
 
-            progress.update({'t': i})
             if return_chain: chain.append(x)
-
-
-        progress.stamp() # en otros usar .close()
 
         if return_chain: chain = torch.stack(chain, dim=1)
         return Sample(x,  chain)
@@ -451,6 +447,18 @@ class GaussianDiffusion_repaint(GaussianDiffusion):
     
     @torch.no_grad()
     def p_sample(self, x, t,mode):
+        if mask is not None:
+            mask = mask.to(x.device)
+            gt = normalize_to_neg_one_to_one(gt)
+            alpha_cumnprod_t = self.alphas_cumprod[t]
+            gt_weight = torch.sqrt(alpha_cumnprod_t).to(x.device) 
+            gt_part = gt_weight * gt
+            noise_weight = torch.sqrt(1 - alpha_cumnprod_t).to(x.device)
+            noise_part = noise_weight * torch.randn_like(x,device=x.device)
+            weighed_gt = gt_part + noise_part
+            x = (mask * weighed_gt) + ((1 - mask) * x)
+
+
         b, *_, device = *x.shape, x.device
         model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=t,mode_batch=mode)
         noise = 0.5*torch.randn_like(x)
@@ -459,49 +467,106 @@ class GaussianDiffusion_repaint(GaussianDiffusion):
         return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
 
     @torch.no_grad()
-    def p_sample_loop(self, shape,traj_known, mode, verbose=False, return_chain=False):
-        """ Classical DDPM (check this) sampling algorithm 
+    def p_sample_loop(self,
+                shape,
+                traj_known, # (B,H,T) same dims as x 
+                mask, # (B,H,T) same dims as x 
+                horizon_sample,
+                batch_size_sample=32, # TODO ver si batchify aca o que venga de antes... 
+                resample=True,
+                resample_iter=10,
+                resample_jump=3,
+                resample_every=50,
+                disable_progess_bar=False, 
+                return_chain=False
+                ):
+        """ Classical DDPM (check this) sampling algorithm with repaint sampling
         
         """
-        device = self.betas.device
 
-        batch_size = shape[0]
-        mask=self.get_mask_from_batch(mode) # (B,H,T) same dims as x 
-        mode=mode.repeat(batch_size,1).float() # B,1
+        device, batch_size = self.betas.device, shape[0]
 
-        x = torch.randn(shape, device=device) # TODO:  en dd usan 0.5*torch.randn(shape, device=device) y no en mtdiff
-        x=traj_known*mask+x*(1-mask) 
+        x = torch.randn(shape, device=device)
         
-        chain = [x] if return_chain else None  
-        progress = utils.Progress(self.n_timesteps) if verbose else utils.Silent()
+        chain = [x] if return_chain else None
 
-        for i in reversed(range(0, self.n_timesteps)): 
-            t = torch.full((batch_size,), i, device=device, dtype=torch.long)
-            x = self.p_sample(x, t,mode)
+        for t in tqdm(reversed(range(0, self.n_timesteps)), desc = 'sampling loop time step', total = self.n_timesteps,disable=disable_progess_bar):
+            t = torch.full((batch_size,), t, device=device, dtype=torch.long)
+            x = self.p_sample(x, t)
             x=traj_known*mask+x*(1-mask)
 
-            progress.update({'t': i})
+            # Resampling loop: line 9 of Algorithm 1 in https://arxiv.org/pdf/2201.09865
+            if resample is True and (t > 0) and (t % resample_every == 0 or t == 1) and mask is not None:
+                # Jump back for resample_jump timesteps and resample_iter times
+                for iter in tqdm(range(resample_iter), desc = 'resample loop', total = resample_iter):
+                    t = resample_jump
+                    beta = self.betas[t]
+                    img = torch.sqrt(1 - beta) * img + torch.sqrt(beta) * torch.randn_like(img)
+                    for j in reversed(range(0, resample_jump)):
+                        x = self.p_sample(x=img, t=t, gt=gt, mask=mask)
+
             if return_chain: chain.append(x)
 
-
-        progress.stamp() # en otros usar .close()
 
         if return_chain: chain = torch.stack(chain, dim=1)
         return Sample(x,  chain)
 
     @torch.no_grad()
-    def conditional_sample(self,traj_known, mode,  horizon_sample=None,batch_size_sample=32, **sample_kwargs):
+    def conditional_sample(self,
+                traj_known,
+                mask,
+                horizon_sample=None,
+                batch_size_sample=32,
+                resample=True,
+                resample_iter=10,
+                resample_jump=3,
+                resample_every=50,
+                disable_progess_bar=False, 
+                return_chain=False
+                ):
         '''
             conditions : [ (time, state), ... ]
         '''
         horizon = horizon_sample or self.horizon
-        shape = (batch_size_sample, horizon, self.transition_dim)
 
-        return self.p_sample_loop(shape,traj_known, mode, **sample_kwargs)
+        return self.p_sample_loop(
+                shape=(batch_size_sample, horizon, self.transition_dim),
+                traj_known=traj_known,
+                mask=mask,
+                horizon_sample=horizon_sample,
+                batch_size_sample=batch_size_sample,
+                resample=resample,
+                resample_iter=resample_iter,
+                resample_jump=resample_jump,
+                resample_every=resample_every,
+                disable_progess_bar=disable_progess_bar, 
+                return_chain=return_chain)
     
 
-    def forward(self,traj_known,mode, *args, **kwargs):
-        return self.conditional_sample(traj_known, mode, *args, **kwargs)
+    def forward(self,
+                traj_known,
+                mask,
+                horizon_sample=None,
+                batch_size_sample=32,
+                resample=True,
+                resample_iter=10,
+                resample_jump=3,
+                resample_every=50,
+                disable_progess_bar=False, 
+                return_chain=False
+                ):
+        
+        return self.conditional_sample(
+                traj_known=traj_known,
+                mask=mask,
+                horizon_sample=horizon_sample,
+                batch_size_sample=batch_size_sample,
+                resample=resample,
+                resample_iter=resample_iter,
+                resample_jump=resample_jump,
+                resample_every=resample_every,
+                disable_progess_bar=disable_progess_bar, 
+                return_chain=return_chain)
 
     #------------------------------------------ training ------------------------------------------#
 
