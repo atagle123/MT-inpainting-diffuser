@@ -10,7 +10,6 @@ import warnings
 import pdb
 
 from .arrays import to_np
-from .video import save_video, save_videos
 
 
 #-----------------------------------------------------------------------------#
