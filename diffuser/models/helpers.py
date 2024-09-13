@@ -140,8 +140,6 @@ def cosine_beta_schedule(timesteps, s=0.008, dtype=torch.float32):
     return torch.tensor(betas_clipped, dtype=dtype)
 
 
-def apply_mask(x,x_unmasked,mask):
-    raise NotImplementedError
 
 #-----------------------------------------------------------------------------#
 #---------------------------------- losses -----------------------------------#
@@ -157,11 +155,8 @@ class WeightedLoss(nn.Module):
                 [ batch_size x horizon x transition_dim ]
         '''
         loss = self._loss(pred, targ)  # (B,H,T)
-     #   print(self.loss_weights)
-     #   print("shapesss:",loss.shape,self.loss_weights.shape,(loss * self.loss_weights).shape)
         weighted_loss = (loss * loss_weights).mean() # (B,H,T)->(1) 
-        #a0_loss = (loss[:, 0, self.action_dim] / self.weights[0, :self.action_dim]).mean() # comentado para ahorrar tiempo... 
-        return weighted_loss#, {'a0_loss': a0_loss}
+        return weighted_loss
 
 
 class WeightedL1(WeightedLoss):

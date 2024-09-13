@@ -333,7 +333,7 @@ class GaussianDiffusion_task_rtg(GaussianDiffusion):
 
         loss = self.loss_fn(pred_epsilon, noise,loss_weights=loss_weights)
 
-        return loss, {}
+        return loss
     
 
     def loss(self, x): 
@@ -585,7 +585,7 @@ class GaussianDiffusion_repaint(GaussianDiffusion):
 
         loss = self.loss_fn(pred_epsilon, noise,loss_weights=self.loss_weights) # Maybe do two functions to do that... 
 
-        return loss, {}
+        return loss
     
 
     def loss(self, x): 
