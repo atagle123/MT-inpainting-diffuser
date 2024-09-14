@@ -1,4 +1,5 @@
 /wandb
+/ignore
 /logs
 __pycache__/
 /halfcheetah_expert-v2.hdf5

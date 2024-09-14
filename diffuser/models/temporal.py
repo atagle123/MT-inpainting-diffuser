@@ -153,8 +153,7 @@ class TemporalUnet_returns(nn.Module):
         dim_mults=(1, 2, 4, 8),
         attention=False,
         returns_condition=False,
-        condition_dropout=0.1,
-        calc_energy=False
+        condition_dropout=0.2
     ):
         super().__init__()
 
@@ -162,18 +161,12 @@ class TemporalUnet_returns(nn.Module):
         in_out = list(zip(dims[:-1], dims[1:]))
         print(f'[ models/temporal ] Channel dimensions: {in_out}')
 
-        if calc_energy:
-            mish = False
-            act_fn = nn.SiLU()
-        else:
-            mish = True
-            act_fn = nn.Mish()
+        act_fn =nn.GELU()
 
         self.returns_dim = dim
 
         self.returns_condition = returns_condition
         self.condition_dropout = condition_dropout
-        self.calc_energy = calc_energy
 
         if self.returns_condition:
             self.returns_mlp = nn.Sequential(
@@ -241,8 +234,6 @@ class TemporalUnet_returns(nn.Module):
             x : [ batch x horizon x transition ]
             returns : [batch x horizon]
         '''
-        if self.calc_energy:
-            x_inp = x
 
         x = einops.rearrange(x, 'b h t -> b t h')
 
@@ -251,6 +242,7 @@ class TemporalUnet_returns(nn.Module):
         if self.returns_condition:
             assert returns is not None
             returns_embed = self.returns_mlp(returns)
+            
             if use_dropout:
                 mask = self.mask_dist.sample(sample_shape=(returns_embed.size(0), 1)).to(returns_embed.device)
                 returns_embed = mask*returns_embed
@@ -282,13 +274,7 @@ class TemporalUnet_returns(nn.Module):
 
         x = einops.rearrange(x, 'b t h -> b h t')
 
-        if self.calc_energy:
-            # Energy function
-            energy = ((x - x_inp)**2).mean()
-            grad = torch.autograd.grad(outputs=energy, inputs=x_inp, create_graph=True)
-            return grad[0]
-        else:
-            return x
+        return x
 
 
 

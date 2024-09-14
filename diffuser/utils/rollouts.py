@@ -17,8 +17,9 @@ class TrajectoryBuffer:
     trajectories: List[Trajectory] = field(default_factory=list)
     current_trajectory: Trajectory = field(default=None)
 
-    def __init__(self, first_observation: np.ndarray, first_info: Any):
-        self.trajectories = []  
+    def __init__(self, first_observation: np.ndarray, first_info: Any,action_dim: int):
+        self.trajectories = []
+        self.action_dim=action_dim
         self.start_trajectory(first_observation, first_info)
 
     def start_trajectory(self, first_observation: np.ndarray, first_info: Any):
@@ -44,14 +45,25 @@ class TrajectoryBuffer:
         self.current_trajectory = None
 
 
-    def rollouts_to_numpy(self,index=-1): 
-        trajectory=self.trajectories[index]
+    def rollouts_to_numpy(self,index=-1):
+        try:
+            trajectory=self.trajectories[index]
+        except:
+            trajectory=self.current_trajectory
 
         states_array=np.stack(trajectory.states, axis=0) # H+1, state_dim
-        actions_array=np.stack(trajectory.actions, axis=0) # H, action_dim
-        rewards_array=np.stack(trajectory.rewards, axis=0) # H, 1
-        total_reward_array=np.stack(trajectory.total_reward, axis=0) # H, 
-        dones_array=np.stack(trajectory.dones, axis=0) # H, 
+        try:
+            actions_array=np.stack(trajectory.actions, axis=0) # H, action_dim
+            rewards_array=np.stack(trajectory.rewards, axis=0) # H, 1
+            total_reward_array=np.stack(trajectory.total_reward, axis=0) # H, 
+            dones_array=np.stack(trajectory.dones, axis=0) # H, 
+
+        except: # this exception happends in the first iteration... 
+            actions_array=np.zeros((1,self.action_dim))
+            rewards_array=np.zeros((1,1))
+            total_reward_array=np.zeros((1,))
+            dones_array=np.zeros((1,))
+
         return(states_array,actions_array,rewards_array,total_reward_array,dones_array) # TODO maybe use a named tuple 
 
     def save_trajectories(self, filepath: str):

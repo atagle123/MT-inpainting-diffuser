@@ -67,55 +67,6 @@ policy_config = utils.Config(
 
 policy = policy_config()
 
-
-###
-#test
-###
-import torch
-import einops
-import wandb
-
-from diffuser.utils.arrays import batch_to_device
-
-def cycle(dl):
-    while True:
-        for data in dl:
-            yield data
-
-import torch.nn as nn
-
-# Initialize MSE Loss function
-mse_loss_fn = nn.MSELoss()
-
-def measure_task_inference_error():
-    dataloader = cycle(torch.utils.data.DataLoader(
-                dataset, batch_size=1, num_workers=0, shuffle=True, pin_memory=True
-            ))
-
-    batch = next(dataloader)
-    batch = batch_to_device(batch)  # batch to device # check this... # TODO maybe it can perform quicly
-    mode_batch=torch.tensor([1]).to(device)
-    mode_batch=mode_batch.repeat(batch_size,1).float() # B,1
-
-    traj = policy(*batch, mode_batch)
-    pred=torch.mean(traj[:,:,-2:],dim=(0,1))
-    target=torch.mean(batch.trajectories[0,:,-2:],dim=0)
-    loss = mse_loss_fn(pred, target)
-    return(loss)
-
-losses=[]
-for i in range(100):
-    loss=measure_task_inference_error()
-    losses.append(loss)
-
-# Compute the mean of the losses
-mean_loss = sum(losses) / len(losses)
-
-print("\nMean Loss:")
-print(mean_loss)
-  #  print(traj[:,:,:-2],"pred")
-   # print(batch.trajectories[0,:,:-2],"actual")
-  #  print( (traj[0:,:,:-2]==batch.trajectories[0,:,:-2]).all())
 #-----------------------------------------------------------------------------#
 #--------------------------------- main loop ---------------------------------#
 #-----------------------------------------------------------------------------#
