@@ -43,6 +43,17 @@ class TrajectoryBuffer:
         self.trajectories.append(self.current_trajectory)
         self.current_trajectory = None
 
+
+    def rollouts_to_numpy(self,index=-1): 
+        trajectory=self.trajectories[index]
+
+        states_array=np.stack(trajectory.states, axis=0) # H+1, state_dim
+        actions_array=np.stack(trajectory.actions, axis=0) # H, action_dim
+        rewards_array=np.stack(trajectory.rewards, axis=0) # H, 1
+        total_reward_array=np.stack(trajectory.total_reward, axis=0) # H, 
+        dones_array=np.stack(trajectory.dones, axis=0) # H, 
+        return(states_array,actions_array,rewards_array,total_reward_array,dones_array) # TODO maybe use a named tuple 
+
     def save_trajectories(self, filepath: str):
         with open(filepath, 'wb') as f:
             pickle.dump(self.trajectories, f)

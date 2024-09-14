@@ -134,16 +134,15 @@ print(savepath, flush=True)
 seed = int(datetime.now().timestamp()) # TODO maybe change this... 
 print(f"Using seed:{seed}")
 
-env = dataset.minari_dataset.recover_environment(render_mode="rgb_array_list") # probar con rgb array list
-#env = gym.make("HalfCheetah-v5",render_mode="rgb_array_list")
+env = dataset.minari_dataset.recover_environment(render_mode="rgb_array_list")
 observation, info = env.reset(seed=seed)  
 
-rollouts=TrajectoryBuffer(observation,info)
+rollouts=TrajectoryBuffer(observation["observation"],info)
 
 total_reward = 0
 for t in range(args["max_episode_length"]):
 
-    action, samples = policy(rollouts, batch_size=args["batch_size"]) # TODO maybe rollouts to torch 
+    action, samples = policy(rollouts, batch_size=args["batch_size"]) 
     ## execute action in environment
     observation, reward, terminated, truncated, info = env.step(action)
     ## print reward and score
@@ -151,13 +150,13 @@ for t in range(args["max_episode_length"]):
 
    # clave que el max episode lenght sea el mismo que el con el que se recolecto el dataset, para el score, si no se tienen scores diferentes.
     print(
-        f't: {t} | r: {reward:.2f} |  R: {total_reward:.2f} | '
-        f'values: {samples.values} | scale: {args["scale"]}',
+        f't: {t} | r: {reward:.2f} |  R: {total_reward:.2f} | ',
+        #f'values: {samples.values} | scale: {args["scale"]}',
         flush=True,)
 
-    rollouts.add_transition(observation, action, reward, terminated,total_reward,info)
+    rollouts.add_transition(observation["observation"], action, reward, terminated,total_reward,info) # TODO this is for maze 
 
-    if terminated:
+    if terminated or info["success"]==True: # TODO this is for maze 
         break
     
 rollouts.end_trajectory()
