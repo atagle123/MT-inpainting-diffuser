@@ -15,6 +15,12 @@ TODO:
 
 - ver para pasar multiples task y que dataset tenga bien repartidos los task... en metaworld 
 
+stuff to solve: 
+
+- how to generalize the scripts between models
+ - generalize configs, solve the trainer... 
+ - generalize the plan, the buffer collector and the interaction with the env...  
+
 
 mode cond diff: pasa un batch con dos modos (32+32 ej) policy recibe historia..., crea el mode batch y lo pasa al modelo, el modelo crea la mascara... y despues en policy se obtienen resultados...
 
