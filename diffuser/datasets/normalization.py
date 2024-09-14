@@ -5,7 +5,6 @@ from diffuser.utils.arrays import atleast_2d
 #-----------------------------------------------------------------------------#
 #--------------------------- multi-field normalizer --------------------------#
 #-----------------------------------------------------------------------------#
-# TODO test and maybe join normalize torch with np... view time... 
 
 class Normalizer:
     def __init__(self,
@@ -40,18 +39,43 @@ class Normalizer:
 
           #  for key, value in self.params_dict[key].items(): # check dtypes
             #    assert value.dtype == np.float32, f"Value for key '{key}' is not of dtype float32"
-
     
     def __call__(self, x, key):
         return self.normalize(x, key)
 
 
-    def normalize(self, *args, **kwargs):
-        raise NotImplementedError()
+    def normalize(self,unnormed_data, key):
+        if isinstance(unnormed_data, np.ndarray):
+            return self.normalize_numpy(unnormed_data, key)
+        elif isinstance(unnormed_data, torch.Tensor):
+            return self.normalize_torch(unnormed_data, key)
+        else:
+            raise TypeError("The object has to be a Torch tensor or a numpy array")
 
 
-    def unnormalize(self, *args, **kwargs):
-        raise NotImplementedError()
+    def unnormalize(self,normed_data, key):
+        if isinstance(normed_data, np.ndarray):
+            return self.unnormalize_numpy(normed_data,key)
+        elif isinstance(normed_data, torch.Tensor):
+            return self.unnormalize_torch(normed_data,key)
+        else:
+            raise TypeError("The object has to be a Torch tensor or a numpy array")
+        
+    def normalize_numpy(self,unnormed_data, key):
+        raise NotImplementedError
+
+
+    def unnormalize_numpy(self,normed_data,key):
+        raise NotImplementedError
+
+    
+    def normalize_torch(self,unnormed_data,key):
+        raise NotImplementedError
+
+    
+    def unnormalize_torch(self,normed_data,key):
+        raise NotImplementedError
+
     
 
 class GaussianNormalizer(Normalizer):
@@ -62,14 +86,14 @@ class GaussianNormalizer(Normalizer):
     def __init__(self, dataset, normed_keys):
         super().__init__(dataset, normed_keys)
 
-    def normalize(self,unnormed_data, key):
+    def normalize_numpy(self,unnormed_data, key):
         
         normed_data=(unnormed_data-self.params_dict[key]["mean"])/self.params_dict[key]["std"]
 
         return(normed_data)
 
 
-    def unnormalize(self,normed_data,key):
+    def unnormalize_numpy(self,normed_data,key):
 
         unnormed_data=normed_data*self.params_dict[key]["std"]+self.params_dict[key]["mean"]
 
@@ -107,7 +131,7 @@ class LimitsNormalizer(Normalizer):
     def __init__(self,dataset,normed_keys):
         super().__init__(dataset,normed_keys)
     
-    def normalize(self,unnormed_data, key): # TODO test... 
+    def normalize_numpy(self,unnormed_data, key): # TODO test... 
         
         ## [ 0, 1 ]
         normed_data=(unnormed_data-self.params_dict[key]["min"])/(self.params_dict[key]["max"] - self.params_dict[key]["min"])
@@ -117,7 +141,7 @@ class LimitsNormalizer(Normalizer):
 
         return(normed_data)
 
-    def unnormalize(self,normed_data,key,eps=1e-4):
+    def unnormalize_numpy(self,normed_data,key,eps=1e-4):
         '''
             x : [ -1, 1 ]
         '''
