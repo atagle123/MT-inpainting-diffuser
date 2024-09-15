@@ -4,7 +4,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from diffuser.sampling.policies import Policy_mode_returns_conditioned
 from diffuser.utils.setup import load_experiment_params,set_seed
 import diffuser.utils as utils
-import wandb
 import imageio.v2 as iio
 import numpy as np
 import torch
@@ -71,15 +70,6 @@ policy = policy_config()
 #-----------------------------------------------------------------------------#
 #--------------------------------- main loop ---------------------------------#
 #-----------------------------------------------------------------------------#
- 
-wandb_log=args["wandb_log"]
-
-if wandb_log:
-    wandb.init(
-        project='MT_inpainting_diffuser',
-        name=exp_name,
-        monitor_gym=True,
-        save_code=True)
     
 print(savepath, flush=True)
 
@@ -97,14 +87,13 @@ for t in range(args["max_episode_length"]):
     action, samples = policy(rollouts,provide_task=observation["desired_goal"]) 
     ## execute action in environment
     observation, reward, terminated, truncated, info = env.step(action)
-    ## print reward and score
+    ## print reward
     total_reward += reward
 
    # clave que el max episode lenght sea el mismo que el con el que se recolecto el dataset, para el score, si no se tienen scores diferentes.
     print(
         f't: {t} | r: {reward:.2f} |  R: {total_reward:.2f} | ',
-        #f'values: {samples.values} | scale: {args["scale"]}',
-        flush=True,)
+        flush=True)
 
     rollouts.add_transition(observation["observation"], action, reward, terminated,total_reward,info) # TODO this is for maze 
 
@@ -113,7 +102,6 @@ for t in range(args["max_episode_length"]):
     
 rollouts.end_trajectory()
 rollouts.save_trajectories(filepath=os.path.join(savepath,f'rollout_{seed}.pkl'))
-
 
 filename = f'rollout_video_{seed}.mp4'
 filepath=os.path.join(savepath,filename)
@@ -127,9 +115,6 @@ for frame in frames:
     frame = (frame * -255).astype(np.uint8)
     writer.append_data(frame)
 writer.close()
-
-if wandb_log: wandb.log({"video": wandb.Video(filepath)})
-
 
 ## write results to json file at `args.savepath`
 logger.finish(t, total_reward, terminated, diffusion_experiment,seed,args["batch_size_sample"])

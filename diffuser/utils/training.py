@@ -145,8 +145,8 @@ class Trainer(object):
         }
         savepath = os.path.join(self.logdir, f'state_{epoch}.pt')
         torch.save(data, savepath)
+        
         if self.wandb_log:
-
             artifact = wandb.Artifact(f"model_state_{epoch}", type='model')
             artifact.add_file(savepath)
             wandb.log_artifact(artifact)
