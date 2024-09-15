@@ -177,7 +177,7 @@ class Policy:
 # idea: policy tiene metodos basicos y el metodo call depende del caso, por ejemplo en el exp rtg se llama a task inference con la historia ya conocida y tambien se llama a la eleccion de acciones... 
 
 
-class Policy_mode(Policy): # TODO falta super init
+class Policy_mode_returns_conditioned(Policy): # TODO falta super init
 
     def __init__(self, diffusion_model, dataset,batch_size_sample,gamma, **sample_kwargs):
         self.diffusion_model = diffusion_model

@@ -1,7 +1,7 @@
 import os
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from diffuser.sampling.policies import Policy
+from diffuser.sampling.policies import Policy_mode_returns_conditioned
 from diffuser.utils.setup import load_experiment_params,set_seed
 import diffuser.utils as utils
 import wandb
@@ -15,7 +15,7 @@ from diffuser.utils.rollouts import TrajectoryBuffer
 #-----------------------------------------------------------------------------#
 
 dataset="maze2d"
-exp_name="rtg_sampling_epsilon"
+exp_name="conditioned_mode_sampling"
 
 args=load_experiment_params(f"logs/configs/{dataset}/{exp_name}/configs_diffusion.txt")
 
@@ -55,7 +55,7 @@ logger_config = utils.Config(
 logger = logger_config()
 
 policy_config = utils.Config(
-    Policy,
+    Policy_mode_returns_conditioned,
     diffusion_model=diffusion,
     dataset=dataset,
     gamma=args["gamma"],
@@ -93,7 +93,7 @@ rollouts=TrajectoryBuffer(observation["observation"],info)
 total_reward = 0
 for t in range(args["max_episode_length"]):
 
-    action, samples = policy(rollouts, batch_size=args["batch_size"]) 
+    action, samples = policy(rollouts) 
     ## execute action in environment
     observation, reward, terminated, truncated, info = env.step(action)
     ## print reward and score
