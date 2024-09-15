@@ -416,7 +416,7 @@ class GaussianDiffusion_task_return_conditioned(GaussianDiffusion):
         loss_weights = torch.einsum('h,t->ht', discounts, dim_weights)
 
         ## manually set a0 weight
-        loss_weights[0, :self.action_dim] = action_weight
+        loss_weights[0, self.observation_dim:self.action_dim+self.observation_dim] = action_weight
 
         # always conditioning on s0
         loss_weights[0,:self.observation_dim] = 0
@@ -437,7 +437,7 @@ class GaussianDiffusion_task_return_conditioned(GaussianDiffusion):
 
         mask_0 = mask_0.expand(self.horizon, self.transition_dim).clone()  # (H, T)
 
-        mask_0[0,self.action_dim:self.action_dim+self.observation_dim]= 1 # condition on s0
+        mask_0[0,:self.observation_dim]= 1 # condition on s0
         mask_0=mask_0.to(device)
         mask_dict[0]=mask_0 # action inference 
 
