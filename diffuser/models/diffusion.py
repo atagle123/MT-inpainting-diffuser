@@ -115,34 +115,6 @@ class GaussianDiffusion(nn.Module):
 
 
 
-"""
- def get_mask_loss_weights(self,K_step_mask):
-        '''
-            sets loss coefficients for masked trajectory
-            
-            K_step_mask: (B,)
-        returns: loss_weights: (B,H,T)
-        '''
-        batch_size=len(K_step_mask)
-        dim_weights=torch.ones(batch_size, self.horizon, self.transition_dim,dtype=torch.float32)
-        #dim_weights = torch.ones(self.transition_dim, dtype=torch.float32)
-
-        ## decay loss with trajectory timestep: discount**t
-        #discounts = self.loss_discount ** torch.arange(self.horizon-K, dtype=torch.float) #TODO: horizon es todo el horizonte y h-K es lo que hay q predecir... 
-        #discounts = discounts / discounts.mean() # TODO: para usar los discount podemos calcularlos antes... y sumarlos al mask 
-
-        #loss_weights = torch.einsum('h-k,t->(h-k)t', discounts, dim_weights)
-
-        loss_weights[:,K_step_mask, :self.action_dim] = self.action_weight
-        loss_weights[:,K_step_mask, self.action_dim:self.action_dim+self.observation_dim] = 0 # because the initial state is given 
-        loss_weights[:,:K_step_mask, :] = 0 # mask behind
-
-        return loss_weights
-
-"""
-
-
-
 class GaussianDiffusion_task(GaussianDiffusion):
     """
     DDPM algorithm with 2 modes, task inference (unmasked plan) or policy sampling (masked plan and unmasked task) 
@@ -168,7 +140,7 @@ class GaussianDiffusion_task(GaussianDiffusion):
         self.loss_fn = Losses[loss_type]()
         self.mask_dict=self.get_mask_mode()
 
-    def get_loss_weights(self, action_weight, rtg_weight, discount):
+    def get_loss_weights(self, action_weight, discount): # TODO test
         '''
             sets loss coefficients for trajectory
 
@@ -188,17 +160,16 @@ class GaussianDiffusion_task(GaussianDiffusion):
         loss_weights = torch.einsum('h,t->ht', discounts, dim_weights)
 
         ## manually set a0 weight
-        loss_weights[0, :self.action_dim] = action_weight
+        loss_weights[0, self.observation_dim:self.action_dim+self.observation_dim] = action_weight
 
         # always conditioning on s0
-        loss_weights[0, self.action_dim:self.action_dim+self.observation_dim] = 0
+        loss_weights[0,:self.observation_dim] = 0
 
-        # manually set rtg weight
-        loss_weights[0, -(self.task_dim+1)] = rtg_weight  # assumes A S R RTG TASK  
-        return loss_weights.to(device="cuda").unsqueeze(0) # (1,H,T) TODO fix
+        return loss_weights.to(device="cuda").unsqueeze(0) # (1,H,T) TODO fix device
 
-    def get_mask_mode(self,device="cuda"): # assumes the following order: A S R RTG T 
+    def get_mask_mode(self,device="cuda"): # assumes the following order: S A R T 
         #TODO fix device 
+        #TODO change function... 
         mask_dict={}
 
         # Crear el tensor de índices para la dimensión T
@@ -210,7 +181,7 @@ class GaussianDiffusion_task(GaussianDiffusion):
 
         mask_0 = mask_0.expand(self.horizon, self.transition_dim).clone()  # (H, T)
 
-        mask_0[0,self.action_dim:self.action_dim+self.observation_dim]= 1 # condition on s0
+        mask_0[0,:self.observation_dim]= 1 # condition on s0
         mask_0=mask_0.to(device)
         mask_dict[0]=mask_0 # action inference 
 
@@ -517,7 +488,7 @@ class GaussianDiffusion_task_return_conditioned(GaussianDiffusion):
         """
         device = self.betas.device
 
-        mask=self.get_mask_from_batch(mode) # (B,H,T) same dims as x 
+        mask=self.get_mask_from_batch(mode) # (B,H,T) same dims as x  # TODO maybe use different mask from the smapling in mode of task inference. 
 
         x = torch.randn(shape, device=device) # (B,H,T) same dims as x 
         x=traj_known*mask+x*(1-mask)

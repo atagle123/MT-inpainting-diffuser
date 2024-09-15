@@ -46,11 +46,12 @@ def expand_tensor(tensor, H, max_K=None):
     
     return expanded_tensor
 
-def get_mask_from_tensor(tensor, H,action_dim,observation_dim,max_K=None):
+def get_mask_from_tensor(tensor, H,observation_dim,max_K=None):
     """
     Function to get mask from a tensor
     """
     max_K= max_K or H
+    #assert max_K>0
     B, K, T = tensor.shape
     ones = torch.ones(B, K, T, dtype=tensor.dtype, device=tensor.device)
 
@@ -58,15 +59,17 @@ def get_mask_from_tensor(tensor, H,action_dim,observation_dim,max_K=None):
         zeros = torch.zeros(B, H - max_K+1, T, dtype=tensor.dtype, device=tensor.device)
                 # Concatenar el tensor original con el tensor de ceros
         mask = torch.cat((ones[:,:(max_K-1),:], zeros), dim=1) # TODO REVISAR
-        mask[:,max_K,action_dim:action_dim+observation_dim]=1 # unmask the first state...
+        mask[:,max_K-1,:observation_dim]=1 # unmask the first state...
         
     else:
         # Crear un tensor de ceros con la forma (H-K, T)
         zeros = torch.zeros(B, H - K+1, T, dtype=tensor.dtype, device=tensor.device) # revisar
         # Concatenar el tensor original con el tensor de ceros
         mask = torch.cat((ones[:,:(K-1),:], zeros), dim=1)
-        mask[:,K-1,action_dim:action_dim+observation_dim]=1 # TODO revisar
+        mask[:,K-1,:observation_dim]=1 # TODO revisar
     
+    assert mask.shape==(B,H,T)
+
     return mask
 
 
@@ -164,8 +167,8 @@ class Policy:
         actions_array=expand_array(actions_array,H=states_array.shape[0]) # ensure that this arrays has the same dims of states,fill with zeros...  K+1,A
         rewards_array=expand_array(rewards_array,H=states_array.shape[0]) # K+1,1
 
-        unkown_part=np.zeros((states_array.shape[0],self.task_dim+1)) # corresponds to the task and the reward to go... K+1, Task_dim+1
-        known_trajectory=np.concatenate([actions_array, states_array,rewards_array,unkown_part], axis=-1) # TODO this is the specific order... 
+        unkown_part=np.zeros((states_array.shape[0],self.task_dim)) # corresponds to the task and the reward to go... K+1, Task_dim+1
+        known_trajectory=np.concatenate([states_array, actions_array ,rewards_array, unkown_part], axis=-1) # TODO this is the specific order... 
 
         known_trajectory_torch=torch.from_numpy(known_trajectory)  # K+1,T
 
@@ -176,18 +179,20 @@ class Policy:
 
 class Policy_mode(Policy): # TODO falta super init
 
-    def __init__(self, diffusion_model, dataset,gamma, **sample_kwargs):
+    def __init__(self, diffusion_model, dataset,batch_size_sample,gamma, **sample_kwargs):
         self.diffusion_model = diffusion_model
         self.dataset = dataset # dataset is a instance of the class sequence dataset
         self.action_dim = diffusion_model.action_dim
         self.observation_dim = diffusion_model.observation_dim
         self.task_dim=diffusion_model.task_dim
         self.gamma=gamma
+        self.batch_size_sample=batch_size_sample
         self.sample_kwargs = sample_kwargs
+        self.horizon_sample=sample_kwargs.get("horizon_sample", self.dataset.horizon) # TODO test this... 
         self.inferred_task_list=[torch.tensor[0,0]] #?
         self.keys_order=("actions", "observations","rewards","returns","task")
 
-    def __call__(self, rollouts):
+    def __call__(self, rollouts,provide_task=None):
         """
         Main policy function that normalizes the data, calls the model and returns the result
 
@@ -210,40 +215,72 @@ class Policy_mode(Policy): # TODO falta super init
         # 
 
         conditions=self.get_last_traj_rollout_torch(rollouts)
-        normed_conditions=self.norm_evertything(conditions,keys_order=self.keys_order) 
-        mode_batch=self.create_mode(batch_size_sample=self.sample_kwargs.get("batch_size_sample"))
-        conditions_batch=self.get_batch_from_conditions(conditions,batch_size_sample,horizon,infered_task)
+        normed_conditions=self.norm_evertything(conditions,keys_order=self.keys_order) # dim 1,K+1,T # TODO COMO HACER QUE no se normalicen las cosas que no se...maskeadas con 0...        mode_batch=self.create_mode(batch_size_sample=self.sample_kwargs.get("batch_size_sample"))
+        if provide_task is None:
+            task=self.infer_task(normed_conditions,H=self.horizon_sample)
+        else:
+            task=torch.from_numpy(provide_task)
 
-        ## run reverse diffusion process
-        trajectories = self.diffusion_model(traj_known=conditions, mode=mode, **self.sample_kwargs) # 
+        actions_sorted,observations_sorted,rewards_sorted, values=self.infer_action(normed_conditions,task,H=self.horizon_sample)
 
-        trajectories=trajectories.trajectories
+        first_action=actions_sorted[0,0] # TODO test this
+     
+        return(first_action.cpu().numpy(), Trajectories(actions_sorted,observations_sorted,rewards_sorted,task))
+    
 
-        # here get the action and the task... 
-     #   print(trajectories[:, :, -self.task_dim:])
-        #normed_rewards = trajectories[:, :, self.action_dim+self.observation_dim:self.action_dim+self.observation_dim+1]
-        #rewards = self.dataset.normalizer.unnormalize_torch(normed_rewards, 'rewards') # normalizar solo acciones y observaciones ... aunque tambien se podrian normalizar las rewards... probar esto... 
-        
-        ## extract action [ batch_size x horizon x transition_dim + 1 ] transition_dim=actions+observations+rewards / + goal
-        #normed_actions = trajectories[:, :, :self.action_dim]
-        #actions = self.dataset.normalizer.unnormalize_torch(normed_actions, 'actions') # normalizar solo acciones y observaciones ... aunque tambien se podrian normalizar las rewards... probar esto... 
+    def infer_task(self,normed_conditions,H):
+        B=self.batch_size_sample
+        mode_batch=torch.ones(B, 1) # task inference
 
-      #  normed_observations = trajectories[:, :, self.action_dim:self.action_dim+self.observation_dim]
-      #  observations = self.dataset.normalizer.unnormalize_torch(normed_observations, 'observation')
+        task_inference=expand_tensor(normed_conditions, H=H,max_K=H) # H,T # TODO VER QUE PASA SI ES MENOR EL K QUE H...
+        mask=get_mask_from_tensor(normed_conditions,H=H,observation_dim=self.observation_dim,max_K=H) # TODO TEST THIS...
 
-      #  normed_task = trajectories[:, :, -self.task_dim:] # TODO check... maybe do one function per sampling mode... 
-       # task = self.dataset.normalizer.unnormalize_torch(normed_task, 'desired_goal')
+        task_inference=mask*task_inference # ENSURE TO not have extra info TODO note that de igual manera esto va a pasar en el modelo...
+        task_inference_batch=task_inference.repeat(B,1,1) # B,H,T
 
-        #TODO ver donde pponer el task sorted.. 
-       # actions_sorted, observations_sorted, rewards_sorted, values = sort_by_values(actions, observations, rewards, gamma=self.gamma) #sort by sampled returns. quizas esta no es la mejor metrica? puede ser que sea inconsistente? 
-        # TODO ver que es mejor, si ordenar el rtg o los rewards... 
-        ## extract first action
-     #   action = actions_sorted[0, 0]
+        trajectories = self.diffusion_model(traj_known=task_inference_batch, mode_batch=mode_batch,returns=None, **self.sample_kwargs)
+        task=self.infer_task_from_batch(trajectories.trajectories)
+        # get mask and condition
+        # pass to the model
+        #obtain task
+        return(task)
+    
+    def infer_task_from_batch(self,sampled_batch):
+        task_mean=torch.mean(sampled_batch[:,:,-self.task_dim:],dim=(0,1))
+        return(task_mean)
+    
 
-      #  trajectories = Trajectories(actions_sorted, observations_sorted, rewards_sorted,task) # generalizar aca ...
+    def infer_action(self,task,normed_conditions,H):
 
-      #  return action, trajectories,task
-        return(trajectories)
+        B=self.batch_size_sample
+        mode_batch=torch.zeros(B, 1) # action inference
+
+        action_inference=expand_tensor(normed_conditions,H=H,max_K=1) # TODO acordarse del ultimo state... TODO TEST THIS... with K> H
+        mask=get_mask_from_tensor(normed_conditions,H=H,observation_dim=self.observation_dim,max_K=1) # TODO TEST THIS...
+        mask[:,:,-self.task_dim:]=1 # known task... 
+
+        action_inference[:,:,-self.task_dim:]=task
+        action_inference=mask*action_inference # ENSURE TO not have extra info TODO note that de igual manera esto va a pasar en el modelo...
+        action_inference_batch=action_inference.repeat(B,1,1).float()
+
+        returns_batch = torch.ones(B, 1).float().to(device="cuda")
+
+        trajectories = self.diffusion_model(traj_known=action_inference_batch, mode_batch=mode_batch,returns=returns_batch, **self.sample_kwargs)
+
+        return(self.infer_action_from_batch(trajectories.trajectories.clone()))
+    
+    def infer_action_from_batch(self,sampled_batch):
+        unnormed_batch=self.unorm_everything(sampled_batch,keys_order=self.keys_order)
+
+        observations=unnormed_batch[:,:,self.observation_dim:]
+        actions=unnormed_batch[:,:,self.observation_dim:self.observation_dim+self.action_dim]
+        rewards=unnormed_batch[:,:,self.observation_dim+self.action_dim:self.observation_dim+self.action_dim+1]
+
+        actions_sorted,observations_sorted,rewards_sorted, values=sort_by_values(actions, observations, rewards,gamma=self.gamma) # TODO test this... 
+
+        return(actions_sorted,observations_sorted,rewards_sorted, values)
+
+
 
 
     def create_mode(self,batch_size_sample):
@@ -251,7 +288,7 @@ class Policy_mode(Policy): # TODO falta super init
         mode_batch = torch.cat((torch.ones(batch_size_sample, 1), torch.zeros(batch_size_sample, 1)), dim=0)  # 2B,1 
         return mode_batch
     
-    def get_batch_from_conditions(self,conditions,batch_size_sample,horizon,infered_task):
+    def get_batch_from_conditions(self,conditions,batch_size_sample,horizon,infered_task): # this function do everything at once... 
         # returns (2B,H,T)
         latest_state=conditions[-1,:] # latest state # assumes the rest is masked with zeros 
         action_inference=expand_tensor(latest_state, H=horizon, max_K=1) # (H,T)
