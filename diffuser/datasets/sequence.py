@@ -237,7 +237,6 @@ class SequenceDataset(torch.utils.data.Dataset):
             self.episodes[ep_id]["returns"]=atleast_2d(returns_array)
 
         self.normed_keys.append("returns")
-
     
     def calc_norm_factor(self,discount,horizon):
         norm_factor=(1-discount)/(1-discount**(horizon+1))
@@ -257,7 +256,7 @@ class SequenceDataset(torch.utils.data.Dataset):
         #check dims... 
 
 
-class Maze2d_inpaint_dataset_no_cond(SequenceDataset):
+class Maze2d_inpaint_dataset(SequenceDataset):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -345,7 +344,7 @@ class Maze2d_inpaint_dataset_no_cond(SequenceDataset):
         return batch
     
 
-class Maze2d_inpaint_dataset(SequenceDataset):
+class Maze2d_inpaint_dataset_returns(SequenceDataset):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -426,8 +425,8 @@ class Maze2d_inpaint_dataset(SequenceDataset):
         returns=episode["returns"][start]
         task=episode["task"][start:end]
 
-        trajectories = np.concatenate([observations, actions, rewards, task], axis=-1) # order change more easily... 
-
+        trajectories = np.concatenate([observations, actions, rewards, task], axis=-1)
+        
         batch = RewardBatch(trajectories,returns)
 
         return batch
