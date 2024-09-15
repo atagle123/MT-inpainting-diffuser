@@ -94,7 +94,7 @@ rollouts=TrajectoryBuffer(observation["observation"],info,action_dim=dataset.act
 total_reward = 0
 for t in range(args["max_episode_length"]):
 
-    action, samples = policy(rollouts) 
+    action, samples = policy(rollouts,provide_task=observation["desired_goal"]) 
     ## execute action in environment
     observation, reward, terminated, truncated, info = env.step(action)
     ## print reward and score
@@ -132,4 +132,4 @@ if wandb_log: wandb.log({"video": wandb.Video(filepath)})
 
 
 ## write results to json file at `args.savepath`
-logger.finish(t, total_reward, terminated, diffusion_experiment,seed,args["scale"],args["batch_size"])
+logger.finish(t, total_reward, terminated, diffusion_experiment,seed,args["batch_size_sample"])
