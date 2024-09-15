@@ -478,7 +478,7 @@ class GaussianDiffusion_task_return_conditioned(GaussianDiffusion):
             Parameters:
                 shape,
                 traj_known: (B,H,T) 
-                mode: assumes is in a batch of the way (B,1)
+                mode: assumes is in a batch of the way (B,)
                 disable_progess_bar=False, 
                 return_chain=False
 
@@ -488,11 +488,12 @@ class GaussianDiffusion_task_return_conditioned(GaussianDiffusion):
         """
         device = self.betas.device
 
-        mask=self.get_mask_from_batch(mode) # (B,H,T) same dims as x  # TODO maybe use different mask from the smapling in mode of task inference. 
+        mask=self.get_mask_from_batch(mode) # (B,H,T) same dims as x , mode is in dims B,# TODO maybe use different mask from the smapling in mode of task inference.
+        mask=mask.float()
+        mode=mode.float().unsqueeze(-1) # B,1
 
         x = torch.randn(shape, device=device) # (B,H,T) same dims as x 
         x=traj_known*mask+x*(1-mask)
-        
         chain = [x] if return_chain else None  
 
         for t in tqdm(reversed(range(0, self.n_timesteps)), desc = 'sampling loop time step', total = self.n_timesteps,disable=disable_progess_bar):
@@ -527,7 +528,7 @@ class GaussianDiffusion_task_return_conditioned(GaussianDiffusion):
         noise = torch.randn_like(x_start)
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
 
-        mode_batch=self.bernoulli_dist.sample(sample_shape=(x_noisy.size(0), )).to(x_noisy.device).long() # (B,1) 0 o 1...
+        mode_batch=self.bernoulli_dist.sample(sample_shape=(x_noisy.size(0), )).to(x_noisy.device).long() # (B,) 0 o 1...
         mask=self.get_mask_from_batch(mode_batch) # (B,H,T) same dims as x 
  
         assert mask.shape==x_noisy.shape

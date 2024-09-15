@@ -58,6 +58,7 @@ policy_config = utils.Config(
     Policy_mode_returns_conditioned,
     diffusion_model=diffusion,
     dataset=dataset,
+    keys_order=args["keys_order"],
     gamma=args["gamma"],
     ## sampling kwargs
     batch_size_sample=args["batch_size_sample"],
@@ -88,7 +89,7 @@ print(f"Using seed:{seed}")
 env = dataset.minari_dataset.recover_environment(render_mode="rgb_array_list")
 observation, info = env.reset(seed=seed)  
 
-rollouts=TrajectoryBuffer(observation["observation"],info)
+rollouts=TrajectoryBuffer(observation["observation"],info,action_dim=dataset.action_dim)
 
 total_reward = 0
 for t in range(args["max_episode_length"]):

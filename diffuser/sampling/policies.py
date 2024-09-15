@@ -179,7 +179,7 @@ class Policy:
 
 class Policy_mode_returns_conditioned(Policy): # TODO falta super init
 
-    def __init__(self, diffusion_model, dataset,batch_size_sample,gamma, **sample_kwargs):
+    def __init__(self, diffusion_model, dataset,batch_size_sample,keys_order,gamma, **sample_kwargs):
         self.diffusion_model = diffusion_model
         self.dataset = dataset # dataset is a instance of the class sequence dataset
         self.action_dim = diffusion_model.action_dim
@@ -189,8 +189,8 @@ class Policy_mode_returns_conditioned(Policy): # TODO falta super init
         self.batch_size_sample=batch_size_sample
         self.sample_kwargs = sample_kwargs
         self.horizon_sample=sample_kwargs.get("horizon_sample", self.dataset.horizon) # TODO test this... 
-        self.inferred_task_list=[torch.tensor[0,0]] #?
-        self.keys_order=("actions", "observations","rewards","returns","task")
+        #self.inferred_task_list=[torch.tensor[0,0]] #?
+        self.keys_order=keys_order
 
     def __call__(self, rollouts,provide_task=None):
         """
@@ -215,7 +215,8 @@ class Policy_mode_returns_conditioned(Policy): # TODO falta super init
         # 
 
         conditions=self.get_last_traj_rollout_torch(rollouts)
-        normed_conditions=self.norm_evertything(conditions,keys_order=self.keys_order) # dim 1,K+1,T # TODO COMO HACER QUE no se normalicen las cosas que no se...maskeadas con 0...        mode_batch=self.create_mode(batch_size_sample=self.sample_kwargs.get("batch_size_sample"))
+        #print(conditions.shape,"shape")
+        normed_conditions=self.norm_evertything(conditions,keys_order=self.keys_order) # dim 1,K+1,T # TODO COMO HACER QUE no se normalicen las cosas que no se...maskeadas con 0...    
         if provide_task is None:
             task=self.infer_task(normed_conditions,H=self.horizon_sample)
         else:
@@ -230,15 +231,16 @@ class Policy_mode_returns_conditioned(Policy): # TODO falta super init
 
     def infer_task(self,normed_conditions,H):
         B=self.batch_size_sample
-        mode_batch=torch.ones(B, 1) # task inference
+        mode_batch=torch.ones(B,).long().to(device="cuda") # task inference
 
         task_inference=expand_tensor(normed_conditions, H=H,max_K=H) # H,T # TODO VER QUE PASA SI ES MENOR EL K QUE H...
         mask=get_mask_from_tensor(normed_conditions,H=H,observation_dim=self.observation_dim,max_K=H) # TODO TEST THIS...
 
         task_inference=mask*task_inference # ENSURE TO not have extra info TODO note that de igual manera esto va a pasar en el modelo...
-        task_inference_batch=task_inference.repeat(B,1,1) # B,H,T
+        #print("tit",task_inference)
+        task_inference_batch=task_inference.repeat(B,1,1).float().to(device="cuda") # B,H,T
 
-        trajectories = self.diffusion_model(traj_known=task_inference_batch, mode_batch=mode_batch,returns=None, **self.sample_kwargs)
+        trajectories = self.diffusion_model(traj_known=task_inference_batch, mode=mode_batch, returns=None, **self.sample_kwargs)
         task=self.infer_task_from_batch(trajectories.trajectories)
         # get mask and condition
         # pass to the model
@@ -250,10 +252,10 @@ class Policy_mode_returns_conditioned(Policy): # TODO falta super init
         return(task_mean)
     
 
-    def infer_action(self,task,normed_conditions,H):
+    def infer_action(self,normed_conditions,task,H):
 
         B=self.batch_size_sample
-        mode_batch=torch.zeros(B, 1) # action inference
+        mode_batch=torch.zeros(B,).long().to(device="cuda") # action inference
 
         action_inference=expand_tensor(normed_conditions,H=H,max_K=1) # TODO acordarse del ultimo state... TODO TEST THIS... with K> H
         mask=get_mask_from_tensor(normed_conditions,H=H,observation_dim=self.observation_dim,max_K=1) # TODO TEST THIS...
@@ -261,11 +263,11 @@ class Policy_mode_returns_conditioned(Policy): # TODO falta super init
 
         action_inference[:,:,-self.task_dim:]=task
         action_inference=mask*action_inference # ENSURE TO not have extra info TODO note that de igual manera esto va a pasar en el modelo...
-        action_inference_batch=action_inference.repeat(B,1,1).float()
+        action_inference_batch=action_inference.repeat(B,1,1).float().to(device="cuda")
 
         returns_batch = torch.ones(B, 1).float().to(device="cuda")
-
-        trajectories = self.diffusion_model(traj_known=action_inference_batch, mode_batch=mode_batch,returns=returns_batch, **self.sample_kwargs)
+        #print(action_inference_batch,"ai")
+        trajectories = self.diffusion_model(traj_known=action_inference_batch, mode=mode_batch,returns=returns_batch, **self.sample_kwargs)
 
         return(self.infer_action_from_batch(trajectories.trajectories.clone()))
     
